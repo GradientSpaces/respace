@@ -224,9 +224,13 @@ If you have any questions regarding this project, please contact Martin (mnbuche
 If using our dataset/model or if you found our work useful, please consider citing us as follows:
 
 ```bibtex
-@article{bucher2025respace,
-  title={ReSpace: Text-Driven 3D Scene Synthesis and Editing with Preference Alignment},
-  author={Bucher, Martin Juan José and Armeni, Iro},
-  year={2025}
+@misc{bucher2025respacetextdriven3dscene,
+    title={ReSpace: Text-Driven 3D Scene Synthesis and Editing with Preference Alignment}, 
+    author={Martin JJ. Bucher and Iro Armeni},
+    year={2025},
+    eprint={2506.02459},
+    archivePrefix={arXiv},
+    primaryClass={cs.CV},
+    url={https://arxiv.org/abs/2506.02459}, 
 }
 ```
