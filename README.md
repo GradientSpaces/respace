@@ -6,7 +6,7 @@
 
 Stanford University
 
-[![arXiv](https://img.shields.io/badge/arXiv-2501.XXXXX-b31b1b.svg)](https://arxiv.org/abs/2506.02459)
+[![arXiv](https://img.shields.io/badge/arXiv-2501.02459-b31b1b.svg)](https://arxiv.org/abs/2506.02459)
 [![Project Page](https://img.shields.io/badge/Project%20Page-Visit-blue)](https://respace.mnbucher.com)
 [![Video](https://img.shields.io/badge/Video-YouTube-red)](https://www.youtube.com/watch?v=2IMHWJqgDPg)
 [![HuggingFace Model](https://img.shields.io/badge/🤗%20HuggingFace-Model-yellow)](https://huggingface.co/gradient-spaces/respace-sg-llm-1.5b)
