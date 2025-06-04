@@ -60,7 +60,7 @@ After providing the paths for the two folders, you will need to run our preproce
 python ./src/preprocessing/3d-front/scale_assets.py
 ```
 
-Finally, we need to pre-compute and cache the embeddings and size properties for the asset calog so the sampling engine can work with this cache. You can use an existing version of this cache that we provide as part of this repository, assuming no modification to the asset catalog has been taken. You will need Git LFS for this, which, if installed correctly, should fetch the file automatically. Make sure the file is located under ```./data/metadata/model_info_3dfuture_assets_embeds.pickle``` as is ~174MB. If you want to run the cache compilation from scratch, you can run:
+Finally, we need to pre-compute and cache the embeddings and size properties for the asset calog so the sampling engine can work with this cache. You can use an existing version of this cache, assuming no modification to the asset catalog has been taken. The file is available here: <a href="https://drive.google.com/file/d/1T-4cwzNrR2MAAPyxsHrcNhNHh4HXc4vY/view?usp=sharing">https://drive.google.com/file/d/1T-4cwzNrR2MAAPyxsHrcNhNHh4HXc4vY/view?usp=sharing</a>. Make sure the file is located under ```./data/metadata/model_info_3dfuture_assets_embeds.pickle``` and is ~174MB. If you want to run the cache compilation from scratch, you can run:
 
 ```bash
 python ./src/preprocessing/3d-front/06_compute_embeds.py
