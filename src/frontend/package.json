@@ -1,0 +1,35 @@
+{
+  "name": "sgllm-frontend-vite",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@react-three/drei": "^9.105.6",
+    "@react-three/fiber": "^8.16.5",
+    "@react-three/postprocessing": "^2.16.2",
+    "@types/three": "^0.164.0",
+    "concaveman": "^1.2.1",
+    "earcut": "^3.0.0",
+    "postprocessing": "^6.35.4",
+    "quickhull3d": "^3.1.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "three": "^0.164.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.2.1",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react": "^7.34.1",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.6",
+    "vite": "^5.2.0"
+  }
+}

@@ -1,0 +1,80 @@
+[
+    [
+        {
+            "total_oob_loss": 0.45550000000000007,
+            "total_mbl_loss": 0.04062500000000001,
+            "obj_with_highest_pbl_loss": {
+                "idx": 4,
+                "pbl": 0.4533750000000001
+            },
+            "total_pbl_loss": 0.4961250000000001,
+            "is_valid_scene_pbl": false,
+            "txt_pms_score": 1.0,
+            "txt_pms_sampled_score": 1.0
+        },
+        {
+            "total_oob_loss": 0.0026249999999999885,
+            "total_mbl_loss": 0.0027500000000000007,
+            "obj_with_highest_pbl_loss": {
+                "idx": 5,
+                "pbl": 0.0026249999999999885
+            },
+            "total_pbl_loss": 0.005374999999999989,
+            "is_valid_scene_pbl": true,
+            "txt_pms_score": 0.75,
+            "txt_pms_sampled_score": 0.75
+        }
+    ],
+    [
+        {
+            "total_oob_loss": 0.024249999999999987,
+            "total_mbl_loss": 0.04125000000000001,
+            "obj_with_highest_pbl_loss": {
+                "idx": 2,
+                "pbl": 0.03299999999999999
+            },
+            "total_pbl_loss": 0.0655,
+            "is_valid_scene_pbl": true,
+            "txt_pms_score": 0.5,
+            "txt_pms_sampled_score": 0.5
+        },
+        {
+            "total_oob_loss": 0.05762500000000004,
+            "total_mbl_loss": 0.03337500000000001,
+            "obj_with_highest_pbl_loss": {
+                "idx": 0,
+                "pbl": 0.09100000000000005
+            },
+            "total_pbl_loss": 0.09100000000000005,
+            "is_valid_scene_pbl": true,
+            "txt_pms_score": 1.0,
+            "txt_pms_sampled_score": 0.8
+        }
+    ],
+    [
+        {
+            "total_oob_loss": 0.07649999999999996,
+            "total_mbl_loss": 0.10712500000000003,
+            "obj_with_highest_pbl_loss": {
+                "idx": 0,
+                "pbl": 0.14987499999999998
+            },
+            "total_pbl_loss": 0.18362499999999998,
+            "is_valid_scene_pbl": false,
+            "txt_pms_score": 1.0,
+            "txt_pms_sampled_score": 1.0
+        },
+        {
+            "total_oob_loss": 0.007125000000000048,
+            "total_mbl_loss": 0.014625000000000004,
+            "obj_with_highest_pbl_loss": {
+                "idx": 1,
+                "pbl": 0.013375000000000003
+            },
+            "total_pbl_loss": 0.021750000000000054,
+            "is_valid_scene_pbl": true,
+            "txt_pms_score": 0.75,
+            "txt_pms_sampled_score": 0.75
+        }
+    ]
+]

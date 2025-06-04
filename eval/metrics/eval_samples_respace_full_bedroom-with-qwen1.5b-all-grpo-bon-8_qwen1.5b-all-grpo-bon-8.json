@@ -1,0 +1,52 @@
+{
+    "mean_metrics": {
+        "total_oob_loss": 21.599333333333337,
+        "total_mbl_loss": 61.48133333333334,
+        "total_pbl_loss": 83.08066666666669,
+        "valid_scene_ratio_pbl": 0.826,
+        "valid_scene_ratio_json": 1.0,
+        "txt_pms_score": 0.8432793650793652,
+        "txt_pms_sampled_score": 0.8385230158730158,
+        "fid_score_diag": 39.093333333333334,
+        "fid_clip_score_diag": 1.8733333333333333,
+        "kid_score_diag": 4.133333333333334,
+        "fid_score_top": 44.31333333333333,
+        "fid_clip_score_top": 2.7099999999999995,
+        "kid_score_top": 2.216666666666667,
+        "diversity_score_top": 15.766666666666666
+    },
+    "std_metrics": {
+        "total_oob_loss": 1.854137718875153,
+        "total_mbl_loss": 7.791740906063431,
+        "total_pbl_loss": 9.290054656130332,
+        "valid_scene_ratio_pbl": 0.011775681155103756,
+        "valid_scene_ratio_json": 0.0,
+        "txt_pms_score": 0.0026512431897121806,
+        "txt_pms_sampled_score": 0.003429605406992084,
+        "fid_score_diag": 0.275237271377906,
+        "fid_clip_score_diag": 0.0740870359029762,
+        "kid_score_diag": 0.24850665092821073,
+        "fid_score_top": 0.17913371790059265,
+        "fid_clip_score_top": 0.06976149845485445,
+        "kid_score_top": 0.032998316455372066,
+        "diversity_score_top": 0.012472191289246206
+    },
+    "print_metrics": {
+        "fid_score_top": "44.31 (+/- 0.18)",
+        "fid_clip_score_top": "2.71 (+/- 0.07)",
+        "kid_score_top": "2.22 (+/- 0.03) (x 0.001)",
+        "total_oob_loss": "21.60 (+/- 1.85) (x 0.001)",
+        "total_mbl_loss": "61.48 (+/- 7.79) (x 0.001)",
+        "total_pbl_loss": "83.08 (+/- 9.29) (x 0.001)",
+        "valid_scene_ratio_pbl": "0.83 (+/- 0.01)",
+        "valid_scene_ratio_json": "1.00 (+/- 0.00)",
+        "txt_pms_score": "0.84 (+/- 0.00)",
+        "txt_pms_sampled_score": "0.84 (+/- 0.00)",
+        "diversity_score_top": "15.77 (+/- 0.01)"
+    },
+    "all_n_samples_actual": [
+        500,
+        500,
+        500
+    ]
+}

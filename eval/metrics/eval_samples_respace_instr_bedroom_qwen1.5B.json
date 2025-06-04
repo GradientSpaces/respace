@@ -1,0 +1,61 @@
+{
+    "mean_metrics": {
+        "total_oob_loss": 28.482583333333338,
+        "total_mbl_loss": 7.935750000000001,
+        "total_pbl_loss": 36.41833333333334,
+        "valid_scene_ratio_pbl": 0.9346666666666666,
+        "valid_scene_ratio_json": 1.0,
+        "txt_pms_score": 0.8828333333333332,
+        "txt_pms_sampled_score": 0.8715999999999999,
+        "delta_oob_loss": 20.683750000000003,
+        "delta_mbl_loss": 6.209750000000002,
+        "delta_pbl_loss": 26.893500000000003,
+        "fid_score_diag": 31.313333333333333,
+        "fid_clip_score_diag": 1.2066666666666668,
+        "kid_score_diag": -0.030000000000000002,
+        "fid_score_top": 35.09666666666667,
+        "fid_clip_score_top": 1.6566666666666665,
+        "kid_score_top": -0.06,
+        "diversity_score_top": 17.37666666666667
+    },
+    "std_metrics": {
+        "total_oob_loss": 4.237047956878572,
+        "total_mbl_loss": 1.2960065747004015,
+        "total_pbl_loss": 5.1298331857760155,
+        "valid_scene_ratio_pbl": 0.014727148022916317,
+        "valid_scene_ratio_json": 0.0,
+        "txt_pms_score": 0.0057978923373546735,
+        "txt_pms_sampled_score": 0.0032427697352040417,
+        "delta_oob_loss": 4.138841630416254,
+        "delta_mbl_loss": 0.9516371638742717,
+        "delta_pbl_loss": 4.8433813214530215,
+        "fid_score_diag": 0.12498888839501762,
+        "fid_clip_score_diag": 0.009428090415820642,
+        "kid_score_diag": 0.008164965809277261,
+        "fid_score_top": 0.2876726534718855,
+        "fid_clip_score_top": 0.030912061651652372,
+        "kid_score_top": 0.0496655480858378,
+        "diversity_score_top": 0.041899350299922304
+    },
+    "print_metrics": {
+        "fid_score_top": "35.10 (+/- 0.29)",
+        "fid_clip_score_top": "1.66 (+/- 0.03)",
+        "kid_score_top": "-0.06 (+/- 0.05) (x 0.001)",
+        "total_oob_loss": "28.48 (+/- 4.24) (x 0.001)",
+        "total_mbl_loss": "7.94 (+/- 1.30) (x 0.001)",
+        "total_pbl_loss": "36.42 (+/- 5.13) (x 0.001)",
+        "delta_oob_loss": "20.68 (+/- 4.14) (x 0.001)",
+        "delta_mbl_loss": "6.21 (+/- 0.95) (x 0.001)",
+        "delta_pbl_loss": "26.89 (+/- 4.84) (x 0.001)",
+        "valid_scene_ratio_pbl": "0.93 (+/- 0.01)",
+        "valid_scene_ratio_json": "1.00 (+/- 0.00)",
+        "txt_pms_score": "0.88 (+/- 0.01)",
+        "txt_pms_sampled_score": "0.87 (+/- 0.00)",
+        "diversity_score_top": "17.38 (+/- 0.04)"
+    },
+    "all_n_samples_actual": [
+        500,
+        500,
+        500
+    ]
+}

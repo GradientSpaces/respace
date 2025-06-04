@@ -1,0 +1,19 @@
+# virtual env
+venv*/
+
+# build files
+build/
+dist/
+*.egg-info
+*.egg
+*.o
+*.so
+*__pycache__*
+
+# output dir
+output/
+tmp/
+
+# IDE
+.idea/
+.vscode/

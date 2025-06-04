@@ -1,0 +1,16 @@
+clean-fid==0.1.35
+numpy==1.24.4
+opencv-python==4.9.0.80
+pillow==10.2.0
+pyrr==0.10.3
+PyYAML==6.0.1
+scipy==1.10.1
+seaborn==0.13.2
+shapely==2.0.4
+simple-3dviz==0.7.0
+torch==1.12.1+cu113
+torchaudio==0.12.1+cu102
+torchvision==0.13.1+cu113
+tqdm==4.66.1
+trimesh==3.21.5
+wxPython==4.1.0

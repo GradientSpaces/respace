@@ -1,0 +1,52 @@
+{
+    "mean_metrics": {
+        "total_oob_loss": 112.5284166666667,
+        "total_mbl_loss": 116.20783333333337,
+        "total_pbl_loss": 228.73625000000007,
+        "valid_scene_ratio_pbl": 0.5906666666666666,
+        "valid_scene_ratio_json": 1.0,
+        "txt_pms_score": 0.7571690476190476,
+        "txt_pms_sampled_score": 0.7306394179894179,
+        "fid_score_diag": 37.059999999999995,
+        "fid_clip_score_diag": 1.6266666666666667,
+        "kid_score_diag": 1.6933333333333334,
+        "fid_score_top": 42.96,
+        "fid_clip_score_top": 2.2733333333333334,
+        "kid_score_top": 1.2166666666666666,
+        "diversity_score_top": 15.896666666666667
+    },
+    "std_metrics": {
+        "total_oob_loss": 3.205878515408156,
+        "total_mbl_loss": 9.729572040805408,
+        "total_pbl_loss": 6.844294823062494,
+        "valid_scene_ratio_pbl": 0.008379870059984364,
+        "valid_scene_ratio_json": 0.0,
+        "txt_pms_score": 0.002826551173142224,
+        "txt_pms_sampled_score": 0.007732987877199565,
+        "fid_score_diag": 0.07788880963698525,
+        "fid_clip_score_diag": 0.012472191289246384,
+        "kid_score_diag": 0.3145720196641073,
+        "fid_score_top": 0.20607442021431727,
+        "fid_clip_score_top": 0.0694422221866655,
+        "kid_score_top": 0.19737161790783284,
+        "diversity_score_top": 0.03299831645537235
+    },
+    "print_metrics": {
+        "fid_score_top": "42.96 (+/- 0.21)",
+        "fid_clip_score_top": "2.27 (+/- 0.07)",
+        "kid_score_top": "1.22 (+/- 0.20) (x 0.001)",
+        "total_oob_loss": "112.53 (+/- 3.21) (x 0.001)",
+        "total_mbl_loss": "116.21 (+/- 9.73) (x 0.001)",
+        "total_pbl_loss": "228.74 (+/- 6.84) (x 0.001)",
+        "valid_scene_ratio_pbl": "0.59 (+/- 0.01)",
+        "valid_scene_ratio_json": "1.00 (+/- 0.00)",
+        "txt_pms_score": "0.76 (+/- 0.00)",
+        "txt_pms_sampled_score": "0.73 (+/- 0.01)",
+        "diversity_score_top": "15.90 (+/- 0.03)"
+    },
+    "all_n_samples_actual": [
+        500,
+        500,
+        500
+    ]
+}

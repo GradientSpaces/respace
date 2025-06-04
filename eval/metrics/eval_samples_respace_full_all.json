@@ -1,0 +1,52 @@
+{
+    "mean_metrics": {
+        "total_oob_loss": 103.93750000000001,
+        "total_mbl_loss": 39.95833333333334,
+        "total_pbl_loss": 143.89583333333334,
+        "valid_scene_ratio_pbl": 0.6666666666666666,
+        "valid_scene_ratio_json": 1.0,
+        "txt_pms_score": 0.8333333333333334,
+        "txt_pms_sampled_score": 0.7999999999999999,
+        "fid_score_diag": 319.97333333333336,
+        "fid_clip_score_diag": 32.4,
+        "kid_score_diag": 15.353333333333333,
+        "fid_score_top": 347.73999999999995,
+        "fid_clip_score_top": 39.97666666666667,
+        "kid_score_top": -30.03,
+        "diversity_score_top": 13.723333333333334
+    },
+    "std_metrics": {
+        "total_oob_loss": 88.47745711008352,
+        "total_mbl_loss": 16.107252291712854,
+        "total_pbl_loss": 76.2131115232514,
+        "valid_scene_ratio_pbl": 0.23570226039551584,
+        "valid_scene_ratio_json": 0.0,
+        "txt_pms_score": 0.05892556509887896,
+        "txt_pms_sampled_score": 0.10606601717798211,
+        "fid_score_diag": 10.286898895628799,
+        "fid_clip_score_diag": 5.1107533691227935,
+        "kid_score_diag": 33.4410888312899,
+        "fid_score_top": 7.3953273535839354,
+        "fid_clip_score_top": 4.59174863810679,
+        "kid_score_top": 11.628422076962979,
+        "diversity_score_top": 4.770704583415559
+    },
+    "print_metrics": {
+        "fid_score_top": "347.74 (+/- 7.40)",
+        "fid_clip_score_top": "39.98 (+/- 4.59)",
+        "kid_score_top": "-30.03 (+/- 11.63) (x 0.001)",
+        "total_oob_loss": "103.94 (+/- 88.48) (x 0.001)",
+        "total_mbl_loss": "39.96 (+/- 16.11) (x 0.001)",
+        "total_pbl_loss": "143.90 (+/- 76.21) (x 0.001)",
+        "valid_scene_ratio_pbl": "0.67 (+/- 0.24)",
+        "valid_scene_ratio_json": "1.00 (+/- 0.00)",
+        "txt_pms_score": "0.83 (+/- 0.06)",
+        "txt_pms_sampled_score": "0.80 (+/- 0.11)",
+        "diversity_score_top": "13.72 (+/- 4.77)"
+    },
+    "all_n_samples_actual": [
+        2,
+        2,
+        2
+    ]
+}

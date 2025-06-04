@@ -1,0 +1,26 @@
+*.bbl
+*.blg
+*.log
+*.out
+*.aux
+*.toc
+*.brf
+*.nav
+*.snm
+*.bz2
+*pyc
+*.swp
+
+*.so
+build/
+
+*.egg-info
+env/
+env3/
+
+*.pkl
+wandb/
+output/
+
+#VS Code settings
+.vscode/

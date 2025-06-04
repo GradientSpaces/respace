@@ -1,0 +1,52 @@
+{
+    "mean_metrics": {
+        "total_oob_loss": 254.38225000000008,
+        "total_mbl_loss": 310.4045000000001,
+        "total_pbl_loss": 564.7867500000001,
+        "valid_scene_ratio_pbl": 0.21866666666666665,
+        "valid_scene_ratio_json": 1.0,
+        "txt_pms_score": 0.7726142857142856,
+        "txt_pms_sampled_score": 0.7275015873015872,
+        "fid_score_diag": 33.393333333333324,
+        "fid_clip_score_diag": 1.8,
+        "kid_score_diag": 5.646666666666667,
+        "fid_score_top": 46.169999999999995,
+        "fid_clip_score_top": 2.42,
+        "kid_score_top": 8.046666666666665,
+        "diversity_score_top": 13.479999999999999
+    },
+    "std_metrics": {
+        "total_oob_loss": 14.167618435185222,
+        "total_mbl_loss": 12.777248835006162,
+        "total_pbl_loss": 25.765459770139298,
+        "valid_scene_ratio_pbl": 0.02054804667656325,
+        "valid_scene_ratio_json": 0.0,
+        "txt_pms_score": 0.005909778974576288,
+        "txt_pms_sampled_score": 0.006312220847148722,
+        "fid_score_diag": 0.11897712198383213,
+        "fid_clip_score_diag": 0.05715476066494087,
+        "kid_score_diag": 0.5016195991209099,
+        "fid_score_top": 0.325371582450997,
+        "fid_clip_score_top": 0.07257180352359077,
+        "kid_score_top": 0.7246761728907303,
+        "diversity_score_top": 0.1267543556122105
+    },
+    "print_metrics": {
+        "fid_score_top": "46.17 (+/- 0.33)",
+        "fid_clip_score_top": "2.42 (+/- 0.07)",
+        "kid_score_top": "8.05 (+/- 0.72) (x 0.001)",
+        "total_oob_loss": "254.38 (+/- 14.17) (x 0.001)",
+        "total_mbl_loss": "310.40 (+/- 12.78) (x 0.001)",
+        "total_pbl_loss": "564.79 (+/- 25.77) (x 0.001)",
+        "valid_scene_ratio_pbl": "0.22 (+/- 0.02)",
+        "valid_scene_ratio_json": "1.00 (+/- 0.00)",
+        "txt_pms_score": "0.77 (+/- 0.01)",
+        "txt_pms_sampled_score": "0.73 (+/- 0.01)",
+        "diversity_score_top": "13.48 (+/- 0.13)"
+    },
+    "all_n_samples_actual": [
+        500,
+        500,
+        500
+    ]
+}

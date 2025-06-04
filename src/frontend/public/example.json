@@ -1,0 +1,189 @@
+{
+    "bounds_top": [
+        [
+            -2.25,
+            6.0,
+            2.2
+        ],
+        [
+            2.25,
+            6.0,
+            2.2
+        ],
+        [
+            2.25,
+            6.0,
+            -2.2
+        ],
+        [
+            -2.25,
+            6.0,
+            -2.2
+        ]
+    ],
+    "bounds_bottom": [
+        [
+            -2.25,
+            0.0,
+            2.2
+        ],
+        [
+            2.25,
+            0.0,
+            2.2
+        ],
+        [
+            2.25,
+            0.0,
+            -2.2
+        ],
+        [
+            -2.25,
+            0.0,
+            -2.2
+        ]
+    ],
+    "room_type": "livingroom",
+    "objects": [
+        {
+            "desc": "A modern, minimalist three-seat gray fabric sofa with square arms and a wooden base.",
+            "size": [
+                2.36,
+                0.96,
+                0.98
+            ],
+            "pos": [
+                1.74,
+                0.0,
+                -0.03
+            ],
+            "rot": [
+                0,
+                -0.70711,
+                0,
+                0.70711
+            ],
+            "jid": "5d450bed-7cb6-4fdd-aaec-3618e0674cfd"
+        },
+        {
+            "desc": "Modern minimalist gray loveseat with fabric upholstery, rectangular shape, detachable cushions, clean lines, block armrests, and tufted detailing.",
+            "size": [
+                1.9,
+                0.72,
+                0.8
+            ],
+            "pos": [
+                0.29,
+                0.0,
+                -1.4
+            ],
+            "rot": [
+                0,
+                0,
+                0,
+                1
+            ],
+            "jid": "0be706f6-4326-4279-8e09-7ad7177b9c3c"
+        },
+        {
+            "desc": "Modern light gray wooden coffee table featuring a minimalist rectangular shape with raised edges and tiered surface for a sleek, functional aesthetic.",
+            "size": [
+                1.37,
+                0.3,
+                1.02
+            ],
+            "pos": [
+                0.26,
+                0.0,
+                0.1
+            ],
+            "rot": [
+                0,
+                0,
+                0,
+                1
+            ],
+            "jid": "d0a80bab-3684-4a5e-8c9d-d2d406a12f98"
+        },
+        {
+            "desc": "Traditional beige wooden corner/side table with a rectangular shape, single drawer with decorative gold handle, open lower shelf, and turned legs.",
+            "size": [
+                0.49,
+                0.5,
+                0.4
+            ],
+            "pos": [
+                1.8,
+                0.0,
+                1.57
+            ],
+            "rot": [
+                0,
+                -0.70711,
+                0,
+                0.70711
+            ],
+            "jid": "3501c287-5c95-47b6-a25d-ba20f12bd6e8"
+        },
+        {
+            "desc": "Traditional beige wooden corner/side table with a rectangular shape, single drawer with decorative gold handle, open lower shelf, and turned legs.",
+            "size": [
+                0.49,
+                0.5,
+                0.4
+            ],
+            "pos": [
+                1.75,
+                0.0,
+                -1.7
+            ],
+            "rot": [
+                0,
+                -0.70711,
+                0,
+                0.70711
+            ],
+            "jid": "3501c287-5c95-47b6-a25d-ba20f12bd6e8"
+        },
+        {
+            "desc": "This modern minimalist lounge chair features a grey fabric cushioned seat and back, black plastic armrests, and a chrome metal frame, offering a sleek and comfortable seating option.",
+            "size": [
+                0.7,
+                0.96,
+                1.01
+            ],
+            "pos": [
+                0.41,
+                0.0,
+                1.55
+            ],
+            "rot": [
+                0,
+                0.94031,
+                0,
+                -0.34032
+            ],
+            "jid": "7bff0ce0-c1aa-4604-b7e2-cdd4d1fdd80f"
+        },
+        {
+            "desc": "Elegant neoclassical wooden TV stand with black and gold finish, featuring ornate carvings, gold accents, multiple drawers, decorative columns, and circular motifs.",
+            "size": [
+                1.93,
+                0.47,
+                0.47
+            ],
+            "pos": [
+                -1.94,
+                0.0,
+                -0.02
+            ],
+            "rot": [
+                0,
+                0.70711,
+                0,
+                0.70711
+            ],
+            "jid": "5648b80e-7b48-44d8-bb34-e47b44d98e67"
+        }
+    ]
+}

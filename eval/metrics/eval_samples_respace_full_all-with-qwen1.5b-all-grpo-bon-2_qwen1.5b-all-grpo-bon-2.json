@@ -1,0 +1,52 @@
+{
+    "mean_metrics": {
+        "total_oob_loss": 133.57425000000003,
+        "total_mbl_loss": 137.0536666666667,
+        "total_pbl_loss": 270.6279166666667,
+        "valid_scene_ratio_pbl": 0.5653333333333332,
+        "valid_scene_ratio_json": 1.0,
+        "txt_pms_score": 0.801247619047619,
+        "txt_pms_sampled_score": 0.7858253968253969,
+        "fid_score_diag": 36.37333333333333,
+        "fid_clip_score_diag": 1.6166666666666665,
+        "kid_score_diag": 1.7633333333333334,
+        "fid_score_top": 43.24666666666667,
+        "fid_clip_score_top": 2.23,
+        "kid_score_top": 1.5566666666666666,
+        "diversity_score_top": 16.19
+    },
+    "std_metrics": {
+        "total_oob_loss": 6.471161626143077,
+        "total_mbl_loss": 21.900024787213273,
+        "total_pbl_loss": 15.454518274511917,
+        "valid_scene_ratio_pbl": 0.012256517540566789,
+        "valid_scene_ratio_json": 0.0,
+        "txt_pms_score": 0.0016822401650148332,
+        "txt_pms_sampled_score": 0.0010175804104149194,
+        "fid_score_diag": 0.2269116323348989,
+        "fid_clip_score_diag": 0.033993463423951834,
+        "kid_score_diag": 0.07930251502246886,
+        "fid_score_top": 0.13199326582148918,
+        "fid_clip_score_top": 0.029439202887759464,
+        "kid_score_top": 0.09463379711052258,
+        "diversity_score_top": 0.16309506430300041
+    },
+    "print_metrics": {
+        "fid_score_top": "43.25 (+/- 0.13)",
+        "fid_clip_score_top": "2.23 (+/- 0.03)",
+        "kid_score_top": "1.56 (+/- 0.09) (x 0.001)",
+        "total_oob_loss": "133.57 (+/- 6.47) (x 0.001)",
+        "total_mbl_loss": "137.05 (+/- 21.90) (x 0.001)",
+        "total_pbl_loss": "270.63 (+/- 15.45) (x 0.001)",
+        "valid_scene_ratio_pbl": "0.57 (+/- 0.01)",
+        "valid_scene_ratio_json": "1.00 (+/- 0.00)",
+        "txt_pms_score": "0.80 (+/- 0.00)",
+        "txt_pms_sampled_score": "0.79 (+/- 0.00)",
+        "diversity_score_top": "16.19 (+/- 0.16)"
+    },
+    "all_n_samples_actual": [
+        500,
+        500,
+        500
+    ]
+}

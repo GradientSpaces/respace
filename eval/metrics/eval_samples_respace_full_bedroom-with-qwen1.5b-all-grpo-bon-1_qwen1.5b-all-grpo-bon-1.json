@@ -1,0 +1,52 @@
+{
+    "mean_metrics": {
+        "total_oob_loss": 67.42183333333334,
+        "total_mbl_loss": 140.7156666666667,
+        "total_pbl_loss": 208.13750000000005,
+        "valid_scene_ratio_pbl": 0.6393333333333334,
+        "valid_scene_ratio_json": 1.0,
+        "txt_pms_score": 0.7475952380952381,
+        "txt_pms_sampled_score": 0.7160603174603174,
+        "fid_score_diag": 38.82333333333333,
+        "fid_clip_score_diag": 1.8,
+        "kid_score_diag": 2.9466666666666668,
+        "fid_score_top": 44.76666666666667,
+        "fid_clip_score_top": 2.6999999999999997,
+        "kid_score_top": 2.1666666666666665,
+        "diversity_score_top": 15.706666666666665
+    },
+    "std_metrics": {
+        "total_oob_loss": 7.136943350545029,
+        "total_mbl_loss": 20.016008048073804,
+        "total_pbl_loss": 13.353094287155576,
+        "valid_scene_ratio_pbl": 0.008993825042154702,
+        "valid_scene_ratio_json": 0.0,
+        "txt_pms_score": 0.01136992409153717,
+        "txt_pms_sampled_score": 0.008511220270698417,
+        "fid_score_diag": 0.23471022323045276,
+        "fid_clip_score_diag": 0.03741657386773945,
+        "kid_score_diag": 0.3064129385141706,
+        "fid_score_top": 0.17987650084309673,
+        "fid_clip_score_top": 0.03559026084010436,
+        "kid_score_top": 0.1158543146465517,
+        "diversity_score_top": 0.2734146220587984
+    },
+    "print_metrics": {
+        "fid_score_top": "44.77 (+/- 0.18)",
+        "fid_clip_score_top": "2.70 (+/- 0.04)",
+        "kid_score_top": "2.17 (+/- 0.12) (x 0.001)",
+        "total_oob_loss": "67.42 (+/- 7.14) (x 0.001)",
+        "total_mbl_loss": "140.72 (+/- 20.02) (x 0.001)",
+        "total_pbl_loss": "208.14 (+/- 13.35) (x 0.001)",
+        "valid_scene_ratio_pbl": "0.64 (+/- 0.01)",
+        "valid_scene_ratio_json": "1.00 (+/- 0.00)",
+        "txt_pms_score": "0.75 (+/- 0.01)",
+        "txt_pms_sampled_score": "0.72 (+/- 0.01)",
+        "diversity_score_top": "15.71 (+/- 0.27)"
+    },
+    "all_n_samples_actual": [
+        500,
+        500,
+        500
+    ]
+}

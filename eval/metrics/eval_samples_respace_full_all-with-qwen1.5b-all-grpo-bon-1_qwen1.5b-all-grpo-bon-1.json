@@ -1,0 +1,52 @@
+{
+    "mean_metrics": {
+        "total_oob_loss": 160.21858333333338,
+        "total_mbl_loss": 181.5844166666667,
+        "total_pbl_loss": 341.80300000000005,
+        "valid_scene_ratio_pbl": 0.494,
+        "valid_scene_ratio_json": 1.0,
+        "txt_pms_score": 0.7528047619047618,
+        "txt_pms_sampled_score": 0.7146269841269842,
+        "fid_score_diag": 39.14333333333334,
+        "fid_clip_score_diag": 1.83,
+        "kid_score_diag": 3.8533333333333335,
+        "fid_score_top": 44.85333333333333,
+        "fid_clip_score_top": 2.4333333333333336,
+        "kid_score_top": 2.44,
+        "diversity_score_top": 16.006666666666664
+    },
+    "std_metrics": {
+        "total_oob_loss": 15.935319338832082,
+        "total_mbl_loss": 26.318103446371083,
+        "total_pbl_loss": 17.91505510155263,
+        "valid_scene_ratio_pbl": 0.009933109617167568,
+        "valid_scene_ratio_json": 0.0,
+        "txt_pms_score": 0.004597565822154195,
+        "txt_pms_sampled_score": 0.006305962257254807,
+        "fid_score_diag": 0.46312945154555596,
+        "fid_clip_score_diag": 0.029439202887759516,
+        "kid_score_diag": 0.28051539866625663,
+        "fid_score_top": 0.5423610933276425,
+        "fid_clip_score_top": 0.08993825042154703,
+        "kid_score_top": 0.09899494936611655,
+        "diversity_score_top": 0.06182412330330421
+    },
+    "print_metrics": {
+        "fid_score_top": "44.85 (+/- 0.54)",
+        "fid_clip_score_top": "2.43 (+/- 0.09)",
+        "kid_score_top": "2.44 (+/- 0.10) (x 0.001)",
+        "total_oob_loss": "160.22 (+/- 15.94) (x 0.001)",
+        "total_mbl_loss": "181.58 (+/- 26.32) (x 0.001)",
+        "total_pbl_loss": "341.80 (+/- 17.92) (x 0.001)",
+        "valid_scene_ratio_pbl": "0.49 (+/- 0.01)",
+        "valid_scene_ratio_json": "1.00 (+/- 0.00)",
+        "txt_pms_score": "0.75 (+/- 0.00)",
+        "txt_pms_sampled_score": "0.71 (+/- 0.01)",
+        "diversity_score_top": "16.01 (+/- 0.06)"
+    },
+    "all_n_samples_actual": [
+        500,
+        500,
+        500
+    ]
+}
