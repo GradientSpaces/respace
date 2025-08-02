@@ -45,8 +45,7 @@ mkdir -p $OUTPUT_DIR_SCENES
 mkdir -p $OUTPUT_DIR_SCENES/1234
 mkdir -p $OUTPUT_DIR_SCENES/3456
 mkdir -p $OUTPUT_DIR_SCENES/5678
-xvfb-run -a python src/pipeline.py --use-gpu --pth-output=$OUTPUT_DIR_SCENES --env="stanley" --room-type=$ROOM_TYPE --model-id=$MODEL_ID --n-test-scenes=$N_TEST_SCENES --bon-llm=$BON_LLM $ICL_FLAG $CLASS_LABELS_FLAG $PROP_SAMPLING_FLAG --icl-k=$ICL_K --do-full-scenes
-xvfb-run -a python src/pipeline.py --use-gpu --pth-output=$OUTPUT_DIR_SCENES --env="stanley" --room-type=$ROOM_TYPE --model-id=$MODEL_ID --n-test-scenes=$N_TEST_SCENES --bon-llm=$BON_LLM $ICL_FLAG $CLASS_LABELS_FLAG $PROP_SAMPLING_FLAG --icl-k=$ICL_K --do-full-scenes --do-bedroom-testset
+xvfb-run -a python src/pipeline.py --use-gpu --pth-output=$OUTPUT_DIR_SCENES --env="stanley" --room-type=$ROOM_TYPE --model-id=$MODEL_ID --n-test-scenes=$N_TEST_SCENES --n-bon-sgllm=$BON_LLM $ICL_FLAG $CLASS_LABELS_FLAG $PROP_SAMPLING_FLAG --icl-k=$ICL_K --do-full-scenes --do-bedroom-testset
 
 compute metrics
 rm -rf $OUTPUT_DIR_VIZ
@@ -89,7 +88,7 @@ mkdir -p $OUTPUT_DIR_SCENES
 mkdir -p $OUTPUT_DIR_SCENES/1234
 mkdir -p $OUTPUT_DIR_SCENES/3456
 mkdir -p $OUTPUT_DIR_SCENES/5678
-xvfb-run -a python src/pipeline.py --use-gpu --pth-output=$OUTPUT_DIR_SCENES --env="stanley" --room-type=$ROOM_TYPE --model-id=$MODEL_ID --n-test-scenes=$N_TEST_SCENES --bon-llm=$BON_LLM $ICL_FLAG $CLASS_LABELS_FLAG $PROP_SAMPLING_FLAG --icl-k=$ICL_K --do-full-scenes --do-livingroom-testset
+xvfb-run -a python src/pipeline.py --use-gpu --pth-output=$OUTPUT_DIR_SCENES --env="stanley" --room-type=$ROOM_TYPE --model-id=$MODEL_ID --n-test-scenes=$N_TEST_SCENES --n-bon-sgllm=$BON_LLM $ICL_FLAG $CLASS_LABELS_FLAG $PROP_SAMPLING_FLAG --icl-k=$ICL_K --do-full-scenes --do-livingroom-testset
 
 # compute metrics
 rm -rf $OUTPUT_DIR_VIZ
@@ -132,7 +131,7 @@ mkdir -p $OUTPUT_DIR_SCENES
 mkdir -p $OUTPUT_DIR_SCENES/1234
 mkdir -p $OUTPUT_DIR_SCENES/3456
 mkdir -p $OUTPUT_DIR_SCENES/5678
-xvfb-run -a python src/pipeline.py --use-gpu --pth-output=$OUTPUT_DIR_SCENES --env="stanley" --room-type=$ROOM_TYPE --model-id=$MODEL_ID --n-test-scenes=$N_TEST_SCENES --bon-llm=$BON_LLM $ICL_FLAG $CLASS_LABELS_FLAG $PROP_SAMPLING_FLAG --icl-k=$ICL_K --do-full-scenes
+xvfb-run -a python src/pipeline.py --use-gpu --pth-output=$OUTPUT_DIR_SCENES --env="stanley" --room-type=$ROOM_TYPE --model-id=$MODEL_ID --n-test-scenes=$N_TEST_SCENES --n-bon-sgllm=$BON_LLM $ICL_FLAG $CLASS_LABELS_FLAG $PROP_SAMPLING_FLAG --icl-k=$ICL_K --do-full-scenes
 
 # compute metrics
 rm -rf $OUTPUT_DIR_VIZ
