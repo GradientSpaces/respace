@@ -6,7 +6,7 @@ from accelerate.utils import set_seed
 from shapely.geometry import Polygon
 import shutil
 import transformers
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 import json
 from cleanfid import fid
 import hashlib
@@ -156,7 +156,7 @@ def inherit_props_by_id(scene_before, scene_after):
 		# print(scene_after)
 		# print("")
 
-def get_model(model_id, use_gpu, accelerator=None, do_not_load_hf_model=False):
+def get_model(model_id, use_gpu, accelerator=None, do_not_load_hf_model=False, use_qlora=False):
 
 	print(f"get_model(): loading tokenizer for {model_id}")
 	tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -195,17 +195,28 @@ def get_model(model_id, use_gpu, accelerator=None, do_not_load_hf_model=False):
 	else:
 		device_map = "cpu"
 
+	# QLoRA: 4-bit quantization config
+	bnb_config = None
+	if use_qlora:
+		bnb_config = BitsAndBytesConfig(
+			load_in_4bit=True,
+			bnb_4bit_quant_type="nf4",
+			bnb_4bit_compute_dtype=torch.bfloat16,
+			bnb_4bit_use_double_quant=True,
+		)
+		device_map = "auto"
+		print("get_model(): using QLoRA 4-bit quantization")
+
 	print(f"get_model(): loading model for {model_id}")
 	if do_not_load_hf_model == True:
 		model = None
 	else:
 		model = AutoModelForCausalLM.from_pretrained(
 			model_id,
-			# device_map="cuda",
 			device_map=device_map,
-			# device_map="auto",
 			torch_dtype=torch.bfloat16,
 			attn_implementation=os.environ.get("ATTN_IMPLEMENTATION", "flash_attention_2" if use_gpu else "sdpa"),
+			quantization_config=bnb_config,
 		)
 
 	return model, tokenizer, max_seq_length
@@ -372,7 +383,7 @@ Room type: '{room_type}'"""
 
 def init_wandb(args, accelerator, resume_id=None):
 	if args.use_wandb and (accelerator.is_main_process or accelerator is None):
-		wandb.init(entity="mnbucher", project="stan-24-sgllm", name=args.run_id, id=(resume_id if resume_id is not None else args.jid), resume=("allow" if resume_id is not None else None))
+		wandb.init(entity="then-master-hm", project="respace-training", name=args.run_id, id=(resume_id if resume_id is not None else args.jid), resume=("allow" if resume_id is not None else None))
 		wandb.config.update(args)
 
 def get_sft_model(model_id, args, accelerator):

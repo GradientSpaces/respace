@@ -91,10 +91,13 @@ def main(args):
 			model_id = "Qwen/Qwen2.5-1.5B-Instruct"
 		elif args.llm == "qwen-2.5-math-1.5B":
 			model_id = "Qwen/Qwen2.5-Math-1.5B-Instruct"
+		elif args.llm == "qwen-3-4B":
+			model_id = "Qwen/Qwen3-4B-Instruct-2507"
 		else:
 			raise ValueError("model not found")
 
-	model, tokenizer, max_seq_length = get_model(model_id, args.use_gpu, accelerator)
+	use_qlora = getattr(args, 'use_qlora', False)
+	model, tokenizer, max_seq_length = get_model(model_id, args.use_gpu, accelerator, use_qlora=use_qlora)
 
 	# print("\nChecking for samples exceeding max_seq_length after processing:")
 	# all_prompts = json.load(open(os.getenv("PTH_ASSETS_METADATA_PROMPTS")))
@@ -156,11 +159,12 @@ if __name__ == "__main__":
 
 	parser.add_argument('--epochs', type=int, default=50)
 	parser.add_argument('--use-lora', action='store_true', default=False)
+	parser.add_argument('--use-qlora', action='store_true', default=False)
 	parser.add_argument('--lora-rank', type=int)
 	parser.add_argument('--lora-alpha', type=int)
 	parser.add_argument('--do-augm', action='store_true', default=False)
-	
-	parser.add_argument('--llm', type=str, choices=["llama-3.2-1B", "llama-3.2-3B", "llama-3.2-7B", "qwen-2.5-0.5B", "qwen-2.5-1.5B"], default="llama-3.2-1B")
+
+	parser.add_argument('--llm', type=str, choices=["llama-3.2-1B", "llama-3.2-3B", "llama-3.2-7B", "qwen-2.5-0.5B", "qwen-2.5-1.5B", "qwen-3-4B"], default="llama-3.2-1B")
 	
 	parser.add_argument('--do-grpo', action='store_true', default=False)
 	parser.add_argument('--grpo-num-gen', type=int, default=8)

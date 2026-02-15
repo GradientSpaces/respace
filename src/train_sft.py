@@ -67,7 +67,11 @@ def run_sft_training(model, model_id, max_seq_length, tokenizer, accelerator, da
 	lora_rank = args.lora_rank if args.lora_rank is not None else 16
 	lora_alpha = args.lora_alpha if args.lora_alpha is not None else lora_rank * 2
 
-	if args.use_lora:
+	use_qlora = getattr(args, 'use_qlora', False)
+	if args.use_lora or use_qlora:
+		if use_qlora:
+			from peft import prepare_model_for_kbit_training
+			model = prepare_model_for_kbit_training(model)
 		peft_config = get_lora_config(lora_rank, lora_alpha)
 		model = get_peft_model(model, peft_config)
 	else:
@@ -82,6 +86,8 @@ def run_sft_training(model, model_id, max_seq_length, tokenizer, accelerator, da
 
 		packing=False,
 		bf16=True,
+		gradient_checkpointing=True,
+		gradient_checkpointing_kwargs={"use_reentrant": False},
 
 		lr_scheduler_type="cosine",
 
