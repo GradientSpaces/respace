@@ -29,7 +29,7 @@ from src.viz import render_full_scene_and_export_with_gif, create_360_video_full
 from src.eval import eval_scene, evaluate_seq_step_add, evaluate_seq_step_remove, build_eval_cache_room
 
 class ReSpace:
-	def __init__(self, model_id="gradient-spaces/respace-sg-llm-1.5b", env_file=".env", dataset_room_type="all", use_gpu=True, accelerator=None, n_bon_sgllm=8, n_bon_assets=1, do_prop_sampling_for_prompt=True, do_icl_for_prompt=True, do_class_labels_for_prompt=True, use_vllm=False, do_removal_only=False, k_few_shot_samples=2, save_prompts_to=None, load_prompts_from=None, do_bon_shuffling=False, bon_shuffling=1, do_sort_add_asc=False, do_sort_add_desc=False, num_workers=1, do_bon_rotation=False, do_debug_rotation=False):
+	def __init__(self, model_id="gradient-spaces/respace-sg-llm-1.5b", env_file=".env", dataset_room_type="all", use_gpu=True, accelerator=None, n_bon_sgllm=1, n_bon_assets=1, do_prop_sampling_for_prompt=True, do_icl_for_prompt=True, do_class_labels_for_prompt=True, use_vllm=True, do_removal_only=False, k_few_shot_samples=2, save_prompts_to=None, load_prompts_from=None, do_bon_shuffling=True, bon_shuffling=8, do_sort_add_asc=False, do_sort_add_desc=False, num_workers=1, do_bon_rotation=True, do_debug_rotation=False):
 
 		load_dotenv(env_file)
 
