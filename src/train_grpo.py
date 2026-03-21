@@ -14,7 +14,7 @@ import gc
 from utils import safe_parse_scene, inherit_props_by_id, get_sft_model, init_wandb
 from dataset import process_scene_sample, format_with_chat_template, create_full_scene_from_before_and_added
 from eval import eval_scene_before_after_with_delta, compute_dss_score, compute_size_l2_dist
-from train import CustomTrainerCallback, compute_custom_token_weights
+from train import CustomTrainerCallback
 
 
 class RewardFunctionWrapper:

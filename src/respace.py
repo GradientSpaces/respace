@@ -2,72 +2,65 @@ import json
 import re
 import copy
 import gc
+import os
+import math
+import shutil
+import time
+import random
+import pickle
+import traceback
+
 import torch
 import numpy as np
-import traceback
-from typing import Optional, Dict, List, Any, Union
-import os
-import pickle
+from pathlib import Path
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from matplotlib import pyplot as plt
 from tqdm import tqdm
-from collections import defaultdict
 from accelerate import Accelerator
-import random
-import pdb
-from pathlib import Path
 from dotenv import load_dotenv
+from vllm import SamplingParams
 
-# Import from your existing utils/modules
-from src.utils import get_model, get_llama_vanilla_pipeline, create_floor_plan_polygon, create_category_lookup
+from src.utils import get_model, get_llama_vanilla_pipeline, create_floor_plan_polygon, create_category_lookup, create_vllm_engine, destroy_vllm_engine, safe_parse_scene
 from src.sample import AssetRetrievalModule
-from src.dataset import build_full_instruction_from_prompt, sample_prompt, load_train_val_test_datasets
-from src.test import run_instr
+from src.dataset import build_full_instruction_from_prompt, format_with_chat_template, sample_prompt, load_train_val_test_datasets, rotate_scenegraph, rotate_obj, FloorObjectSampler
+from src.test import run_instr, get_sample_outputs_batch, run_bon_test_for_addition
 from src.viz import render_full_scene_and_export_with_gif, create_360_video_full
-from src.vllm_inference import VLLMWrapper
+from src.eval import eval_scene, evaluate_seq_step_add, evaluate_seq_step_remove, build_eval_cache_room
 
 class ReSpace:
-	def __init__(self, model_id="gradient-spaces/respace-sg-llm-1.5b", env_file=".env", dataset_room_type="all", use_gpu=True, accelerator=None, n_bon_sgllm=8, n_bon_assets=1, do_prop_sampling_for_prompt=True, do_icl_for_prompt=True, do_class_labels_for_prompt=True, use_vllm=False, do_removal_only=False, k_few_shot_samples=2):
+	def __init__(self, model_id="gradient-spaces/respace-sg-llm-1.5b", env_file=".env", dataset_room_type="all", use_gpu=True, accelerator=None, n_bon_sgllm=8, n_bon_assets=1, do_prop_sampling_for_prompt=True, do_icl_for_prompt=True, do_class_labels_for_prompt=True, use_vllm=False, do_removal_only=False, k_few_shot_samples=2, save_prompts_to=None, load_prompts_from=None, do_bon_shuffling=False, bon_shuffling=1, do_sort_add_asc=False, do_sort_add_desc=False, num_workers=1, do_bon_rotation=False, do_debug_rotation=False):
 
 		load_dotenv(env_file)
+
+		self.save_prompts_to = save_prompts_to
+		self.load_prompts_from = load_prompts_from
+		self.saved_prompts = {}
+
+		if self.load_prompts_from and os.path.exists(self.load_prompts_from):
+			with open(self.load_prompts_from, 'r') as f:
+				self.saved_prompts = json.load(f)
+			print(f"Loaded prompts from {self.load_prompts_from}")
 		
 		# prepare models
 		self.model, self.tokenizer, self.max_seq_length = get_model(model_id, use_gpu, accelerator, do_not_load_hf_model=(use_vllm == True or do_removal_only == True))
 		self.use_vllm = use_vllm
 	
-		# load SG-LLM
+		# load SG-LLM via vLLM
 		self.vllm_engine = None
 		if use_vllm and not do_removal_only:
 			try:
-				self.vllm_engine = VLLMWrapper(
-					model_id=model_id,
-					tokenizer=self.tokenizer,
-					gpu_memory_utilization=0.2,
-					max_model_len=self.max_seq_length,
-				)
+				self.vllm_engine = create_vllm_engine(model_id, self.max_seq_length, gpu_memory_utilization=0.23)
 				print("SG-LLM: vLLM initialized successfully")
 			except Exception as e:
 				print(f"Failed to initialize vLLM: {e}. Falling back to regular generation.")
 				self.use_vllm = False
 
 		# load zero-shot LLM
-		self.vanilla_model_id = "meta-llama/Meta-Llama-3.1-8B-Instruct"
 		self.vanilla_vllm_engine = None
-		self.vanilla_pipeline = None
-		_, self.vanilla_tokenizer, _ = get_model(self.vanilla_model_id, use_gpu, accelerator=None, do_not_load_hf_model=True)
-		if use_vllm and self.use_vllm:
-			try:
-				self.vanilla_vllm_engine = VLLMWrapper(
-					model_id=self.vanilla_model_id,
-					tokenizer=self.vanilla_tokenizer,
-					gpu_memory_utilization=0.85,
-					max_model_len=5000,
-				)
-				print("Vanilla LLM: vLLM initialized successfully for vanilla pipeline")
-			except Exception as e:
-				print(f"Failed to initialize vLLM for vanilla pipeline: {e}. Using regular pipeline.")
-				self.vanilla_pipeline = get_llama_vanilla_pipeline()
-		else:
-			self.vanilla_pipeline = get_llama_vanilla_pipeline()
+		# self.vanilla_pipeline = None
+		_, self.vanilla_tokenizer, _ = get_model("meta-llama/Meta-Llama-3.1-8B-Instruct", use_gpu, accelerator=None, do_not_load_hf_model=True)
+		self.vanilla_pipeline = get_llama_vanilla_pipeline()
 
 		# sampling engine
 		if not do_removal_only:
@@ -91,7 +84,19 @@ class ReSpace:
 		self.k_few_shot_samples = k_few_shot_samples
 		self.dataset_stats_for_prompt = None
 
+		self.do_bon_shuffling = do_bon_shuffling
+		self.bon_shuffling = bon_shuffling
+		
+		self.do_sort_add_asc = do_sort_add_asc
+		self.do_sort_add_desc = do_sort_add_desc
+
+		self.num_workers = num_workers
+		self.do_bon_rotation = do_bon_rotation
+		self.do_debug_rotation = do_debug_rotation
+		print("using num_workers=", num_workers)
+
 		self.max_n_attempts = 10
+		self.pth_dataset_stats_cache = {}
 
 	def _prepare_dataset_stats_for_object_sampler(self, gen_room_type=None):
 		if gen_room_type == None:
@@ -101,9 +106,13 @@ class ReSpace:
 
 		pth_dataset_stats = os.path.join(os.getenv("PTH_DATASET_CACHE"), f"merged_dataset_stats_{self.dataset_room_type}_{room_type_filter}.pkl")
 
-		if os.path.exists(pth_dataset_stats):
-			print("loading stats file...")
+		if pth_dataset_stats in self.pth_dataset_stats_cache:
+			print("loading stats from in-memory cache...")
+			all_stats = self.pth_dataset_stats_cache[pth_dataset_stats]
+		elif os.path.exists(pth_dataset_stats):
+			print("loading stats file from disk...")
 			all_stats = pickle.load(open(pth_dataset_stats, "rb"))
+			self.pth_dataset_stats_cache[pth_dataset_stats] = all_stats
 		else:
 			print("creating stats file...")
 			all_assets_metadata = json.load(open(os.getenv("PTH_ASSETS_METADATA")))
@@ -142,6 +151,381 @@ class ReSpace:
 
 		return all_stats
 	
+	def _generate_unique_shuffles(self, commands, k):
+		if k <= 1:
+			return [commands.copy()]
+		
+		unique_shuffles = [commands.copy()]  # Original order is first
+		seen = {tuple(commands)}
+		
+		max_attempts = k * 10  # Prevent infinite loop
+		attempts = 0
+		
+		# First, try to find unique shuffles
+		while len(unique_shuffles) < k and attempts < max_attempts:
+			shuffled = commands.copy()
+			random.shuffle(shuffled)
+			shuffled_tuple = tuple(shuffled)
+			
+			if shuffled_tuple not in seen:
+				seen.add(shuffled_tuple)
+				unique_shuffles.append(shuffled)
+			attempts += 1
+		
+		# If we couldn't find enough unique shuffles, fill with duplicates
+		while len(unique_shuffles) < k:
+			duplicate = random.choice(unique_shuffles).copy()
+			unique_shuffles.append(duplicate)
+		
+		return unique_shuffles
+	
+	def _has_token_budget(self, instr_str, min_output_tokens=150):
+		"""Check if the instruction leaves enough room for output tokens within max_seq_length."""
+		formatted = format_with_chat_template(self.tokenizer, instr_str)
+		n_input_tokens = len(self.tokenizer.encode(formatted))
+		has_budget = n_input_tokens + min_output_tokens <= self.max_seq_length
+		if not has_budget:
+			print(f"  Token budget exhausted: {n_input_tokens} input + {min_output_tokens} output > {self.max_seq_length} max")
+		return has_budget
+
+	def _compute_scene_metrics(self, scene, eval_cache=None):
+		"""Evaluate a full scene and return total_pbl_loss + txt_pms_sampled_score."""
+		result = eval_scene(scene, is_debug=False, eval_cache=eval_cache)
+		return {
+			"total_pbl_loss":      result.get("total_pbl_loss", float('inf')),
+			"txt_pms_sampled_score": result.get("txt_pms_sampled_score", 0.0),
+		}
+	
+	def _add_object_with_rotation_augment(self, prompt, current_scene, temp=0.7, do_rendering_with_object_count=False, pth_viz_output=None):
+		"""Add object using 4 rotation augmentations (0/90/180/270 deg).
+
+		Batches all 4 rotated prompts into ONE vLLM call, then pools ALL candidates
+		(4 rotations × BoN) into a single flat selection pass. This avoids hierarchical
+		selection (BoN-first then rotation-first) which compounds PMS bias.
+
+		eval_cache and before_metrics are computed ONCE on the original (unrotated) scene.
+		All candidates are inverse-rotated to the original frame before eval.
+		"""
+		angles = [0, math.pi/2, math.pi, 3*math.pi/2]
+
+		# Phase 1: Create 4 rotated scene copies and prepare prompts
+		rotated_scenes = []
+		all_instrs = []
+		for angle in angles:
+			scene_copy = copy.deepcopy(current_scene)
+			if angle != 0:
+				rotate_scenegraph(scene_copy, angle)
+			rotated_scenes.append(scene_copy)
+			instr = self._prepare_input_for_addition(prompt, scene_copy)
+			all_instrs.extend(instr)
+
+		# Token budget check on longest instruction
+		if not self._has_token_budget(max(all_instrs, key=len)):
+			print(f"Cannot fit output for '{prompt}' with rotation augment. Returning current scene.")
+			return current_scene, True
+
+		# Phase 2: ONE batched vLLM call — 4 prompts × BoN responses
+		all_responses = get_sample_outputs_batch(
+			all_instrs, self.model, self.tokenizer, self.max_seq_length,
+			self.accelerator, self.n_bon_sgllm, return_logits=False,
+			temp=temp, vllm_engine=(self.vllm_engine if self.use_vllm else None)
+		)
+
+		# Phase 3: Flatten all responses (4 rotations × BoN) into one candidate list.
+		# Inverse-rotate each candidate back to original frame for shared eval.
+		flat_responses = []
+		angle_per_response = []  # track which angle each flattened response came from
+		for i, angle in enumerate(angles):
+			responses_i = all_responses[i]
+			responses_list = responses_i if isinstance(responses_i, list) else [responses_i]
+			for resp in responses_list:
+				scene_after = safe_parse_scene(resp)
+				if scene_after is None:
+					flat_responses.append(resp)
+				else:
+					if angle != 0:
+						rotate_obj(scene_after, -angle)
+					flat_responses.append(json.dumps(scene_after))
+				angle_per_response.append(angle)
+
+		# Phase 4: Single selection pass over ALL candidates (shared room cache)
+		eval_cache = build_eval_cache_room(current_scene)
+		before_metrics = eval_scene(current_scene, is_debug=False, eval_cache=eval_cache)
+
+		result = run_bon_test_for_addition(
+			prompt, flat_responses, current_scene,
+			self.n_bon_assets, self.sampling_engine,
+			pth_viz_output=pth_viz_output,
+			do_rendering_with_object_count=do_rendering_with_object_count,
+			num_workers=self.num_workers,
+			eval_cache=eval_cache, before_metrics=before_metrics,
+		)
+
+		len_before = len(current_scene.get("objects"))
+		if result.get("scene") and len(result["scene"].get("objects", [])) == len_before + 1:
+			pms = result.get("txt_pms_sampled_score", 0.0)
+			dpbl = result.get("delta_pbl_loss", float('inf'))
+
+			result_scene = result["scene"]
+			result_scene["objects"][-1]["prompt"] = prompt
+
+			# Determine winning angle for logging
+			# The winning object is already in the original frame; find which angle it came from
+			# by checking the result index from run_bon_test_for_addition
+			winning_angle = 0  # default
+			best_idx = result.get("best_idx", None)
+			if best_idx is not None and best_idx < len(angle_per_response):
+				winning_angle = angle_per_response[best_idx]
+
+			total_pbl = result.get("total_pbl_loss", float('inf'))
+			print(f"  Added '{prompt}': PMS={pms:.4f}, PBL={total_pbl:.6f}, angle={int(math.degrees(winning_angle))}deg (BoN={self.n_bon_sgllm} + ROT, N={len(flat_responses)})")
+
+			# # Debug: render all 4 rotations
+			# if self.do_debug_rotation:
+			# 	n_objs = len(result_scene.get("objects", []))
+			# 	pth_debug = Path("./eval/viz/misc/rotation-debug")
+			# 	# delete folder
+			# 	if pth_debug.exists():
+			# 		shutil.rmtree(pth_debug)
+			# 	os.makedirs(pth_debug, exist_ok=True)
+
+			# 	for r_idx, angle in enumerate(angles):
+			# 		r_angle_deg = int(math.degrees(angle))
+			# 		is_best = "_BEST" if angle == winning_angle else ""
+
+			# 		resp_i = all_responses[r_idx]
+			# 		raw_resp = resp_i[0] if isinstance(resp_i, list) else resp_i
+			# 		raw_obj = safe_parse_scene(raw_resp)
+			# 		if raw_obj is None:
+			# 			print(f"  [debug-rotation] rot={r_angle_deg}deg: parse failed, skipping render")
+			# 			continue
+
+			# 		obj_to_append = raw_obj["objects"][-1] if raw_obj.get("objects") is not None else raw_obj
+
+			# 		# (A) Rotated frame: rotated scene + raw object (what the model saw)
+			# 		debug_scene_rotated = copy.deepcopy(rotated_scenes[r_idx])
+			# 		debug_scene_rotated["objects"].append(copy.deepcopy(obj_to_append))
+			# 		debug_scene_rotated = self.sampling_engine.sample_all_assets(debug_scene_rotated, is_greedy_sampling=True)
+
+			# 		fname_rot = f"n{n_objs}_rot{r_angle_deg}_ROTATED-FRAME{is_best}"
+			# 		print(f"  [debug-rotation] rendering {fname_rot}")
+			# 		render_full_scene_and_export_with_gif(debug_scene_rotated, fname_rot, pth_debug, create_gif=False)
+
+			# 		# (B) Original frame: original scene + raw object with inverse rotation
+			# 		obj_to_append_inverted = copy.deepcopy(obj_to_append)
+			# 		rotate_obj(obj_to_append_inverted, -angle)
+
+			# 		debug_scene_original = copy.deepcopy(current_scene)
+			# 		debug_scene_original["objects"].append(copy.deepcopy(obj_to_append_inverted))
+			# 		debug_scene_original = self.sampling_engine.sample_all_assets(debug_scene_original, is_greedy_sampling=True)
+
+			# 		fname_orig = f"n{n_objs}_rot{r_angle_deg}_ORIGINAL-FRAME-WITH-INVROT{is_best}"
+			# 		print(f"  [debug-rotation] rendering {fname_orig}")
+			# 		render_full_scene_and_export_with_gif(debug_scene_original, fname_orig, pth_debug, create_gif=False)
+
+			# 	print(f"  [debug-rotation] saved renders to {pth_debug}")
+			# 	print("\n=== DEBUG ROTATION: first object rendered, exiting early ===")
+			# 	exit(0)
+
+			return result_scene, True
+
+		return current_scene, False
+
+	def _run_shuffled_additions(self, add_commands, scene_after_removals, do_rendering_with_object_count=False, pth_viz_output=None):
+		"""Breadth-first shuffled object addition with batched vLLM inference.
+
+		Instead of running each shuffle sequentially (8 shuffles × M steps = 8M vLLM calls),
+		this batches all shuffles' prompts at each step into a single vLLM call (M calls total).
+
+		With rotation augmentation enabled, each shuffle gets 4 rotated variants (0/90/180/270),
+		so the batch grows to N×4 prompts per step. Best rotation is picked per shuffle per step.
+		"""
+		shuffled_versions = self._generate_unique_shuffles(add_commands, self.bon_shuffling)
+		n_shuffles = len(shuffled_versions)
+		n_steps = len(add_commands)
+		n_rotations = 4 if self.do_bon_rotation else 1
+		angles = [0, math.pi/2, math.pi, 3*math.pi/2] if self.do_bon_rotation else [0]
+
+		print(f"\n=== SHUFFLING MODE (breadth-first): {n_shuffles} orderings, {n_steps} steps, rot_augment={self.do_bon_rotation} ===\n")
+
+		shuffle_scenes = [copy.deepcopy(scene_after_removals) for _ in range(n_shuffles)]
+		shuffle_alive = [True] * n_shuffles
+		shuffle_budget_exhausted = [False] * n_shuffles
+
+		# Room voxel cache is independent of objects — compute once, share across all shuffles and steps
+		room_eval_cache = build_eval_cache_room(scene_after_removals)
+
+		for step_idx in range(n_steps):
+			alive_indices = [i for i in range(n_shuffles) if shuffle_alive[i] and not shuffle_budget_exhausted[i]]
+			if not alive_indices:
+				if any(shuffle_budget_exhausted):
+					print(f"All remaining shuffles have exhausted token budget at step {step_idx + 1}/{n_steps}")
+				else:
+					print("All shuffles dead, aborting")
+				break
+
+			print(f"\n--- Step {step_idx + 1}/{n_steps} ({len(alive_indices)} alive shuffles) ---")
+
+			# Phase 1: Collect prompts for all alive shuffles × rotations, checking token budget
+			prompts = []        # one per batch entry (shuffle that made it)
+			all_instrs = []     # N_batch × n_rotations instructions
+			batch_indices = []  # which shuffle indices made it into the batch
+
+			for shuf_idx in alive_indices:
+				command = shuffled_versions[shuf_idx][step_idx]
+				prompt_obj = re.search(r'<add>(.*?)</add>', command).group(1).strip().lower()
+
+				# Create rotated scenes and instructions for this shuffle
+				rot_instrs = []
+				for angle in angles:
+					scene_copy = copy.deepcopy(shuffle_scenes[shuf_idx])
+					if angle != 0:
+						rotate_scenegraph(scene_copy, angle)
+					instr = self._prepare_input_for_addition(prompt_obj, current_scene=scene_copy)
+					rot_instrs.append(instr[0])
+
+				# Budget check on longest instruction (rotation may change length slightly)
+				if not self._has_token_budget(max(rot_instrs, key=len)):
+					shuffle_budget_exhausted[shuf_idx] = True
+					n_objs = len(shuffle_scenes[shuf_idx].get("objects", []))
+					print(f"  Shuffle {shuf_idx + 1}: token budget exhausted at {n_objs} objects, keeping partial scene")
+					continue
+
+				prompts.append(prompt_obj)
+				all_instrs.extend(rot_instrs)
+				batch_indices.append(shuf_idx)
+
+			if not batch_indices:
+				print(f"  No shuffles have token budget at step {step_idx + 1}, stopping early")
+				break
+
+			# Phase 2: ONE batched vLLM call (all shuffles × rotations)
+			start_time = time.time()
+			all_responses = get_sample_outputs_batch(
+				all_instrs, self.model, self.tokenizer, self.max_seq_length,
+				self.accelerator, self.n_bon_sgllm, temp=0.7,
+				vllm_engine=(self.vllm_engine if self.use_vllm else None),
+			)
+			n_batch = len(batch_indices)
+			print(f"  Batched vLLM ({len(all_instrs)} prompts = {n_batch} shuffles × {n_rotations} rot, n={self.n_bon_sgllm}) took {time.time() - start_time:.2f}s")
+
+			# Phase 3: Pre-compute before_metrics per shuffle (room cache is shared)
+			shuffle_caches = []
+			for b_idx in range(n_batch):
+				shuf_idx = batch_indices[b_idx]
+				bm = eval_scene(shuffle_scenes[shuf_idx], is_debug=False, eval_cache=room_eval_cache)
+				shuffle_caches.append(bm)
+
+			# Phase 4: For each shuffle, flatten all rotation×BoN candidates into one
+			# selection pass (avoids hierarchical BoN-first then rotation-first bias)
+			for b_idx in range(n_batch):
+				shuf_idx = batch_indices[b_idx]
+				prompt_obj = prompts[b_idx]
+				bm = shuffle_caches[b_idx]
+				len_before = len(shuffle_scenes[shuf_idx].get("objects", []))
+
+				# Collect and inverse-rotate all candidates for this shuffle
+				flat_responses = []
+				for r_idx in range(n_rotations):
+					resp_idx = b_idx * n_rotations + r_idx
+					angle = angles[r_idx]
+					responses_i = all_responses[resp_idx]
+					responses_list = responses_i if isinstance(responses_i, list) else [responses_i]
+					for resp in responses_list:
+						scene_after = safe_parse_scene(resp)
+						if scene_after is None:
+							flat_responses.append(resp)
+						else:
+							if angle != 0:
+								rotate_obj(scene_after, -angle)
+							flat_responses.append(json.dumps(scene_after))
+
+				# Single selection pass over all candidates for this shuffle
+				result = run_bon_test_for_addition(
+					prompt_obj, flat_responses, shuffle_scenes[shuf_idx],
+					self.n_bon_assets, self.sampling_engine,
+					pth_viz_output=pth_viz_output,
+					do_rendering_with_object_count=do_rendering_with_object_count,
+					do_renderings=True,
+					num_workers=self.num_workers,
+					eval_cache=room_eval_cache, before_metrics=bm,
+				)
+
+				if result.get("scene") is not None and len(result["scene"].get("objects", [])) == len_before + 1:
+					new_obj = result["scene"]["objects"][-1]
+					pms = result.get("txt_pms_sampled_score", 0.0)
+					dpbl = result.get("delta_pbl_loss", float('inf'))
+
+					shuffle_scenes[shuf_idx] = copy.deepcopy(shuffle_scenes[shuf_idx])
+					shuffle_scenes[shuf_idx]["objects"].append(new_obj)
+					shuffle_scenes[shuf_idx]["objects"][-1]["prompt"] = prompt_obj
+
+					print(f"    Shuffle {shuf_idx + 1}: PMS={pms:.4f}, dPBL={dpbl:.4f} (N={len(flat_responses)})")
+				else:
+					if self.n_bon_sgllm == 1:
+						print(f"  Shuffle {shuf_idx + 1}: failed, retrying '{prompt_obj}' individually...")
+						scene, ok = self.add_object(
+							prompt_obj, shuffle_scenes[shuf_idx],
+							do_rendering_with_object_count=do_rendering_with_object_count,
+							pth_viz_output=pth_viz_output,
+							temp=0.7,
+						)
+						if ok:
+							shuffle_scenes[shuf_idx] = scene
+							print(f"  Shuffle {shuf_idx + 1}: retry succeeded")
+						else:
+							shuffle_alive[shuf_idx] = False
+							print(f"  Shuffle {shuf_idx + 1}: retry failed, marking dead")
+					else:
+						shuffle_alive[shuf_idx] = False
+						print(f"  Shuffle {shuf_idx + 1}: all BoN candidates failed, marking dead")
+
+			# Free intermediate data from this step (responses, parsed scenes, etc.)
+			gc.collect()
+			torch.cuda.empty_cache()
+
+		# Final: evaluate complete scenes in parallel, pick best
+		# Include both alive and budget-exhausted shuffles (both have valid scenes)
+		alive_with_objects = [
+			i for i in range(n_shuffles)
+			if (shuffle_alive[i] or shuffle_budget_exhausted[i]) and len(shuffle_scenes[i].get("objects", [])) > 0
+		]
+		for i in range(n_shuffles):
+			if (shuffle_alive[i] or shuffle_budget_exhausted[i]) and i not in alive_with_objects:
+				print(f"Shuffle {i + 1}: alive but no objects, skipping")
+
+		candidates = []
+		if alive_with_objects:
+			n_eval_workers = min(len(alive_with_objects), self.num_workers)
+			print(f"  Evaluating {len(alive_with_objects)} alive shuffles in parallel (workers={n_eval_workers})...")
+			with ThreadPoolExecutor(max_workers=n_eval_workers) as pool:
+				future_to_idx = {
+					pool.submit(self._compute_scene_metrics, shuffle_scenes[i], room_eval_cache): i
+					for i in alive_with_objects
+				}
+				for future in as_completed(future_to_idx):
+					shuf_idx = future_to_idx[future]
+					metrics = future.result()
+					n_objs = len(shuffle_scenes[shuf_idx].get("objects", []))
+					print(f"  Shuffle {shuf_idx + 1}: PMS={metrics['txt_pms_sampled_score']:.4f}, PBL={metrics['total_pbl_loss']:.6f}, n_objects={n_objs}")
+					candidates.append((shuf_idx + 1, copy.deepcopy(shuffle_scenes[shuf_idx]), metrics))
+
+		if candidates:
+			min_pbl = min(c[2]["total_pbl_loss"] for c in candidates)
+			pbl_tied = [c for c in candidates if c[2]["total_pbl_loss"] == min_pbl]
+			best_shuffle_idx, best_scene, best_metrics = max(pbl_tied, key=lambda c: c[2]["txt_pms_sampled_score"])
+
+			pool_parts = [f"BoN={self.n_bon_sgllm}", f"SHUFFL={n_shuffles}"]
+			if self.do_bon_rotation:
+				pool_parts.append("ROT")
+			pool_desc = " + ".join(pool_parts)
+			n_total = n_shuffles * n_rotations * self.n_bon_sgllm
+			summary = f"PMS={best_metrics['txt_pms_sampled_score']:.4f}, PBL={best_metrics['total_pbl_loss']:.6f}, shuffle=#{best_shuffle_idx}"
+			print(f"\n=== BEST SCENE: {summary} ({pool_desc}, N={n_total}) ===\n")
+			return best_scene, True
+		else:
+			return None, False
+
 	def _build_full_query_for_zeroshot_model(self, prompt, scenegraph):
 		query = f"""<prompt>{prompt}<prompt>\n"""
 		if scenegraph is not None:
@@ -199,6 +583,11 @@ class ReSpace:
 				for obj_prompt in sample:
 					full_prompt += f"<add>{obj_prompt}</add>\n"
 
+		if self.do_sort_add_asc:
+			full_prompt += "\n IMPORTANT: order your <add> commands by estimated physical size of the objects in ASCENDING order (smallest objects first, largest objects last)."
+		elif self.do_sort_add_desc:
+			full_prompt += "\n IMPORTANT: order your <add> commands by estimated physical size of the objects in DESCENDING order (largest objects first, smallest objects last)."
+
 		full_prompt += "\nREMINDER: each description in your <add>...</add> commands should be IN NOUN PHRASE WITH 2-3 words AND AT MAXIMUM 5 words"
 
 		return full_prompt
@@ -251,52 +640,82 @@ class ReSpace:
 		for obj in scene_tmp.get("objects"):
 			obj = {k: v for k, v in obj.items() if not k.startswith("sampled_")}
 		return self.sampling_engine.sample_all_assets(scene_tmp, is_greedy_sampling=is_greedy_sampling)
+
+	def _save_prompts(self, scene_id, prompt, commands, current_scene):
+		self.saved_prompts[scene_id] = {
+			"commands":      commands,
+			"original_prompt": prompt,
+			"room_type":     current_scene.get("room_type"),
+			"n_objects":     len([c for c in commands if c.startswith("<add>")]),
+		}
+		os.makedirs(
+			os.path.dirname(self.save_prompts_to) if os.path.dirname(self.save_prompts_to) else '.',
+			exist_ok=True,
+		)
+		with open(self.save_prompts_to, 'w') as f:
+			json.dump(self.saved_prompts, f, indent=2)
+		print(f"Saved {len(commands)} commands for scene {scene_id}")
 	
 	def add_object(self, prompt, current_scene, do_sample_assets_for_input_scene=False, do_rendering_with_object_count=False, temp=None, do_dynamic_temp=True, pth_viz_output=None):
 		print("adding object...")
 
 		if do_sample_assets_for_input_scene:
 			current_scene = self.sampling_engine.sample_all_assets(current_scene, is_greedy_sampling=(True if self.n_bon_assets == 1 else False))
-		
+
 		batch_full_instrs = self._prepare_input_for_addition(prompt, current_scene=current_scene)
 		len_before = len(current_scene.get("objects"))
 
+		if not self._has_token_budget(batch_full_instrs[0]):
+			print(f"  Token budget exhausted for '{prompt}' (n_objs={len_before}). Keeping current scene.")
+			return current_scene, True
+
+		if self.do_bon_rotation:
+			# Rotation augmentation path: 4 rotations × BoN candidates, flat selection
+			scene, success = self._add_object_with_rotation_augment(
+				prompt, current_scene, temp=(temp if temp else 0.7),
+				do_rendering_with_object_count=do_rendering_with_object_count,
+				pth_viz_output=pth_viz_output
+			)
+			if success:
+				return scene, True
+			else:
+				print("  Rotation augment failed for all angles. Falling back to vanilla retry.")
+				# Fall through to vanilla retry below
+
+		# Vanilla retry loop (no rotation, or rotation fallback)
 		temp = copy.copy(temp)
 		remaining_attempts = copy.copy(self.max_n_attempts)
 
 		while True:
 			try:
 				if do_dynamic_temp and remaining_attempts < self.max_n_attempts and temp != None:
-					# first, decrease temp to get more deterministic results
 					temp = max(temp - 0.05, 0.4)
-					# if not successful, increase temp to get more diverse results and see if we escape weird behavior
 					if temp == 0.4:
 						temp = 1.2
-				print(f"temp: {temp}")
-				best_result = run_instr(prompt, current_scene, batch_full_instrs, self.model, self.tokenizer, self.max_seq_length, self.accelerator, self.n_bon_sgllm, self.n_bon_assets, self.sampling_engine, pth_viz_output, do_rendering_with_object_count=do_rendering_with_object_count, temp=temp, vllm_engine=(self.vllm_engine if self.use_vllm else None))
+				best_result = run_instr(prompt, current_scene, batch_full_instrs, self.model, self.tokenizer, self.max_seq_length, self.accelerator, self.n_bon_sgllm, self.n_bon_assets, self.sampling_engine, pth_viz_output, do_rendering_with_object_count=do_rendering_with_object_count, temp=temp, vllm_engine=(self.vllm_engine if self.use_vllm else None), num_workers=self.num_workers)
 
 				if best_result.get("scene") != None and len(best_result.get("scene").get("objects")) == len_before + 1:
-					print(f"SUCCESS! after: {len(best_result.get('scene').get('objects'))}, before: {len_before}")
+					pms = best_result.get("txt_pms_sampled_score", 0.0)
+					total_pbl = best_result.get("total_pbl_loss", float('inf'))
+					print(f"  Added '{prompt}': PMS={pms:.4f}, PBL={total_pbl:.6f} (BoN={self.n_bon_sgllm}, N={self.n_bon_sgllm})")
 					current_scene = best_result.get("scene")
 					current_scene["objects"][-1]["prompt"] = prompt
-					is_success = True
-					return current_scene, is_success
+					return current_scene, True
 				else:
-					print("ERROR: no object was added. response: ", best_result.get("scene"))
-					
+					print("  No valid object added. Retrying...")
+
 			except Exception as exc:
 				print(exc)
 				traceback.print_exc()
-				print("Failed to add object. Retrying...")
-			
+				print("  Failed to add object. Retrying...")
+
 			if remaining_attempts > 0:
 				remaining_attempts -= 1
-				print(f"Retrying... {remaining_attempts} attempts left.")
+				print(f"  Retrying add_object() ... {remaining_attempts} attempts left.")
 			else:
-				print("Max attempts reached. Returning current scene without any changes.")
-				is_success = False
-				return current_scene, is_success
-			
+				print("  Max attempts reached. Returning current scene without changes.")
+				return current_scene, False
+
 			gc.collect()
 			torch.cuda.empty_cache()
 	
@@ -309,7 +728,6 @@ class ReSpace:
 		query = f"""<remove>{prompt}<remove>
 <scenegraph>{json.dumps(current_scene)}</scenegraph>"""
 		
-		# system_prompt = "You are a world-class interior design expert. Your task is to identify which object from the scene best matches the given description. Respond with ONLY the index of the object in the scene's objects list (0-based indexing). If no object matches well, respond with -1."
 		system_prompt = """you are a world-class leading interior design expert. your task is to remove furniture given the descriptions in the header and the current list of furniture in the body. you must respond ONLY with a valid JSON string that matches precisely the *format* of the existing JSON in the request.
 
 if there are multiple objects that match the description precisely, you should remove all of them.
@@ -324,7 +742,6 @@ you can further assume that in most cases, there will be at least one object in 
 
 only output the JSON (with the removed objects) as a plain string and nothing else."""
 
-		# if no object matches the description, you should respond with 'nothing removed'.
 
 		messages = [
 			{"role": "system", "content": system_prompt},
@@ -344,22 +761,19 @@ only output the JSON (with the removed objects) as a plain string and nothing el
 
 				# Get response from vanilla LLM
 				print(f"temp: {temp}")
-				torch.use_deterministic_algorithms(False)
 				if self.vanilla_vllm_engine is not None:
-					vllm_prompt = f"<s>[INST] {system_prompt} [/INST]\n\n{query}</s>"
-					inputs = self.vanilla_tokenizer(vllm_prompt, return_tensors="pt")
-					input_ids = inputs["input_ids"]
-					attention_mask = inputs["attention_mask"]
-					response = self.vanilla_vllm_engine.generate(
-						input_ids, 
-						attention_mask,
-						max_new_tokens=16384,
-						temperature=temp,
-						top_p=0.95,
-						top_k=50,
+					formatted_prompt = self.vanilla_tokenizer.apply_chat_template(
+						messages,
+						tokenize=False,
+						add_generation_prompt=True,
 					)
-					# TODO: format correctly for output
+					vllm_outputs = self.vanilla_vllm_engine.generate(
+						[formatted_prompt],
+						SamplingParams(max_tokens=16384, temperature=temp, top_p=0.95, top_k=50),
+					)
+					response = vllm_outputs[0].outputs[0].text
 				else:
+					start_time = time.time()
 					outputs = self.vanilla_pipeline(
 						messages,
 						max_new_tokens=16384,
@@ -367,9 +781,7 @@ only output the JSON (with the removed objects) as a plain string and nothing el
 						temperature=temp
 					)
 					response = outputs[0]["generated_text"][-1]["content"].strip()
-				torch.use_deterministic_algorithms(True)
-				
-				response = outputs[0]["generated_text"][-1]["content"].strip()
+					print("[removal] vanilla pipeline generation took {time:.2f} seconds".format(time=time.time() - start_time))
 
 				if response == "nothing removed":
 					print("No object removed.")
@@ -382,7 +794,7 @@ only output the JSON (with the removed objects) as a plain string and nothing el
 				n_objs_scene_after = len(scene_after.get("objects"))
 
 				if n_objs_scene_after < n_objs_scene_before:
-					print(f"SUCCESS! after: {n_objs_scene_after}, before: {n_objs_scene_before}")
+					print(f"SUCCESS for removal! after: {n_objs_scene_after}, before: {n_objs_scene_before}")
 					is_success = True
 					return scene_after, is_success
 				else:
@@ -394,7 +806,7 @@ only output the JSON (with the removed objects) as a plain string and nothing el
 			
 			if remaining_attempts > 0:
 				remaining_attempts -= 1
-				print(f"Retrying... {remaining_attempts} attempts left.")
+				print(f"Retrying remove_object() ... {remaining_attempts} attempts left.")
 			else:
 				print("Max attempts reached. Returning current scene without any changes.")
 				is_success = False
@@ -403,7 +815,7 @@ only output the JSON (with the removed objects) as a plain string and nothing el
 			gc.collect()
 			torch.cuda.empty_cache()
 	
-	def generate_full_scene(self, room_type=None, n_objects=None, scene_bounds_only=None, do_rendering_with_object_count=False, pth_viz_output=None):
+	def generate_full_scene(self, room_type=None, n_objects=None, scene_bounds_only=None, do_rendering_with_object_count=False, pth_viz_output=None, scene_id=None, do_skip_removals=False):
 		
 		self.dataset_stats_for_prompt = self._prepare_dataset_stats_for_object_sampler(room_type)
 		self.floor_object_sampler = FloorObjectSampler(self.dataset_stats_for_prompt.get("floor_area_n_objects"))
@@ -429,277 +841,199 @@ only output the JSON (with the removed objects) as a plain string and nothing el
 		
 		system_prompt = self._get_system_prompt_zeroshot_handle_user_instr(few_shot_samples=few_shot_samples)
 
-		return self.handle_prompt(prompt, scene_bounds_only, system_prompt, do_rendering_with_object_count=do_rendering_with_object_count, pth_viz_output=pth_viz_output)
-		
-		
-	def handle_prompt(self, prompt, current_scene=None, room_type=None, do_rendering_with_object_count=False, pth_viz_output=None):
+		return self.handle_prompt(prompt, scene_bounds_only, system_prompt, do_rendering_with_object_count=do_rendering_with_object_count, pth_viz_output=pth_viz_output, scene_id=scene_id, do_skip_removals=do_skip_removals)
 
-		if current_scene == None:
-			current_scene = self._sample_random_bounds(self.dataset_train, room_type)
 
-		# skip few shot samples here for the moment (we would need to inject n_objects as a prior, would probably randomly sample this number if not provided ?)
-		# floor_area = create_floor_plan_polygon(current_scene.get("bounds_bottom")).area
-		# few_shot_samples = None
-		# if self.k_few_shot_samples > 0:
-		# 	few_shot_samples = self.floor_object_sampler.sample_few_shot_samples(floor_area, n_objects, k=self.k_few_shot_samples)
+	def _run_commands_sequential(self, current_scene, all_commands, gt_steps=None, skip_per_step_eval=False, do_rendering_with_object_count=False, pth_viz_output=None):
+		"""Execute pre-decomposed add/remove commands in the given order with optional per-step eval."""
+		step_results = [] if gt_steps is not None else None
 
-		if self.dataset_stats_for_prompt == None:
-			self.dataset_stats_for_prompt = self._prepare_dataset_stats_for_object_sampler(current_scene.get("room_type"))
+		print("=============================================")
+		print(f"existing scene with # of objects: {len(current_scene.get('objects', []))}")
+		for cmd in all_commands:
+			print(f"  {cmd}")
+		print("=============================================")
 
+		current_scene = self.sampling_engine.sample_all_assets(current_scene, is_greedy_sampling=True)
+
+		for step_idx, command in enumerate(all_commands):
+			scene_before = copy.deepcopy(current_scene)
+
+			if command.startswith("<add>"):
+				prompt_obj = re.search(r'<add>(.*?)</add>', command).group(1).strip().lower()
+				current_scene, _ = self.add_object(
+					prompt_obj, current_scene,
+					do_rendering_with_object_count=do_rendering_with_object_count,
+					pth_viz_output=pth_viz_output, temp=0.7,
+				)
+				if gt_steps is not None and not skip_per_step_eval:
+					step_results.append(evaluate_seq_step_add(gt_steps[step_idx], current_scene, scene_before))
+
+			elif command.startswith("<remove>"):
+				prompt_obj = re.search(r'<remove>(.*?)</remove>', command).group(1).strip().lower()
+				current_scene, _ = self.remove_object(
+					prompt_obj, current_scene,
+					do_rendering_with_object_count=do_rendering_with_object_count,
+					pth_viz_output=pth_viz_output,
+				)
+				if gt_steps is not None and not skip_per_step_eval:
+					step_results.append(evaluate_seq_step_remove(gt_steps[step_idx], current_scene, scene_before))
+
+			else:
+				print(f"WARNING: unrecognised command format, skipping: {command}")
+
+		overall_success = len(current_scene.get("objects", [])) > 0
+		return current_scene, overall_success, step_results
+
+	def _decompose_prompt_to_commands(self, prompt, current_scene, system_prompt=None):
+		"""Use zero-shot LLM to decompose a natural language prompt into add/remove commands."""
 		query = self._build_full_query_for_zeroshot_model(prompt, scenegraph=current_scene)
-
-		system_prompt = self._get_system_prompt_zeroshot_handle_user_instr(few_shot_samples=None)
-
+		if system_prompt is None:
+			system_prompt = self._get_system_prompt_zeroshot_handle_user_instr(few_shot_samples=None)
 		messages = [
 			{"role": "system", "content": system_prompt},
 			{"role": "user", "content": query},
 		]
-		
-		remaining_attempts = copy.copy(self.max_n_attempts)
-		while True:
-			try:
-				# get list of objects from vanilla pipeline
-				torch.use_deterministic_algorithms(False)
-				outputs = self.vanilla_pipeline(messages, max_new_tokens=4096, pad_token_id=self.vanilla_pipeline.tokenizer.eos_token_id, temperature=0.7)
-				torch.use_deterministic_algorithms(True)
-				response = outputs[0]["generated_text"][-1]["content"]
 
-				# Parse response
-				response_json = json.loads(response)
-				if response_json.get("commands") is None:
-					print("ERROR: no commands found in response.")
-				else:
-					# sort commands by remove first, then add
-					response_json["commands"].sort(key=lambda x: (not x.startswith("<remove>"), x))
-
-					print("=============================================")
-					print(len(response_json.get("commands")), response_json)
-					print("=============================================")
-					
-					# Process commands one by one
-					print("processing commands...")
-					for command in response_json.get("commands"):
-						if command.startswith("<add>"):
-							prompt = re.search(r'<add>(.*?)</add>', command).group(1).lower()
-							temp = 0.7
-							current_scene, is_success = self.add_object(prompt, current_scene, do_rendering_with_object_count=do_rendering_with_object_count, pth_viz_output=pth_viz_output, temp=temp)
-						elif command.startswith("<remove>"):
-							prompt = re.search(r'<remove>(.*?)</remove>', command).group(1).lower()
-							current_scene, is_success = self.remove_object(prompt, current_scene, do_rendering_with_object_count=do_rendering_with_object_count, pth_viz_output=pth_viz_output)
-						else:
-							print(f"UNKNOWN COMMAND {command}")
-				
-				if len(current_scene.get("objects")) > 0:
-					print("SUCCESS! after: ", len(current_scene.get("objects")))
-					is_success = True
-					return current_scene, is_success
-				else:
-					print("ERROR: no object was added")
-					
-			except Exception as exc:
-				print(f"Error: {exc}")
-				print(f"Response: {response}")
-				traceback.print_exc()
-			
-			if remaining_attempts > 0:
-				remaining_attempts -= 1
-				print(f"Retrying... {remaining_attempts} attempts left.")
-			else:
-				print("Max attempts reached. Returning empty scene.")
-				is_success = False
-				return current_scene, is_success
-
-			gc.collect()
-			torch.cuda.empty_cache()
-		
-
-class FloorObjectSampler:
-	def __init__(self, dataset_stats, num_bins_floor=25):
-		self.floor_areas = np.array([item["floor_area"] for item in dataset_stats])
-		self.object_counts = np.array([item["n_objects"] for item in dataset_stats])
-		
-		self.floor_min = np.min(self.floor_areas)
-		self.floor_max = np.max(self.floor_areas)
-		self.floor_bins = np.linspace(self.floor_min, self.floor_max, num_bins_floor + 1)
-		
-		self.obj_min = np.min(self.object_counts)
-		self.obj_max = np.max(self.object_counts)
-		self.obj_bins = np.linspace(self.obj_min - 0.5, self.obj_max + 0.5, self.obj_max - self.obj_min + 2)
-		
-		self.hist, _, _ = np.histogram2d(self.floor_areas, self.object_counts, bins=[self.floor_bins, self.obj_bins])
-		
-		epsilon = 1e-10
-		row_sums = np.sum(self.hist, axis=1)
-		row_sums = np.where(row_sums == 0, epsilon, row_sums)
-		# rows are floor area bins, columns are object count bins, normalize by row so each floor area bin sums to 1
-		self.conditional_probs = self.hist / row_sums[:, np.newaxis]
-
-		self.objects_lookup = defaultdict(list)
-
-		for item in dataset_stats:
-			floor_area = item["floor_area"]
-			obj_count = item["n_objects"]
-			objects_list = item["object_prompts"]
-			
-			floor_bin = np.digitize(floor_area, self.floor_bins) - 1
-			floor_bin = max(0, min(floor_bin, len(self.floor_bins) - 2))
-			
-			obj_bin = obj_count - self.obj_min
-			obj_bin = max(0, min(obj_bin, len(self.conditional_probs[0]) - 1))
-			
-			key = (floor_bin, obj_bin)
-			self.objects_lookup[key].append(objects_list)
-	
-	def sample_obj_count_for_floor_area(self, floor_area, do_prop_sampling=True, n=1):
-		floor_area = np.clip(floor_area, self.floor_min, self.floor_max)
-		floor_bin_idx = np.digitize(floor_area, self.floor_bins) - 1
-		floor_bin_idx = max(0, min(floor_bin_idx, len(self.floor_bins) - 2))
-
-		if do_prop_sampling:
-			# sample from discrete distribution that is conditioned on floor area bin
-			probs = self.conditional_probs[floor_bin_idx]
-			if np.all(probs == 0):
-				probs = np.ones_like(probs) / len(probs)
-			obj_bin_idx = np.random.choice(len(probs), p=probs, size=n)
-
-			obj_cnts = []
-			for idx in obj_bin_idx:
-				obj_cnts.append(self.obj_min + idx)
+		start_time = time.time()
+		if self.vanilla_vllm_engine is not None:
+			formatted_prompt = self.vanilla_tokenizer.apply_chat_template(
+				messages, tokenize=False, add_generation_prompt=True,
+			)
+			vllm_outputs = self.vanilla_vllm_engine.generate(
+				[formatted_prompt],
+				SamplingParams(max_tokens=4096, temperature=0.7, top_p=0.95, top_k=50),
+			)
+			response = vllm_outputs[0].outputs[0].text
 		else:
-			# sample uniformly within given floor area bin, given obj_min and obj_max for that bin
-			obj_cnts = []
-			valid_obj_bins = np.where(self.hist[floor_bin_idx] > 0)[0]
+			torch.use_deterministic_algorithms(False)
+			outputs = self.vanilla_pipeline(
+				messages, max_new_tokens=4096,
+				pad_token_id=self.vanilla_pipeline.tokenizer.eos_token_id,
+				temperature=0.7,
+			)
+			response = outputs[0]["generated_text"][-1]["content"]
+			torch.use_deterministic_algorithms(True)
 
-			if len(valid_obj_bins) == 0:
-				obj_bin_indices = np.random.randint(0, self.obj_max - self.obj_min + 1, size=n)
-				for idx in obj_bin_indices:
-					obj_cnts.append(self.obj_min + idx)
-			else:
-				# Get the min and max object counts in this floor bin
-				min_obj_bin = valid_obj_bins.min()
-				max_obj_bin = valid_obj_bins.max()
-				min_obj_count = self.obj_min + min_obj_bin
-				max_obj_count = self.obj_min + max_obj_bin
-				
-				# Sample uniformly from the range of valid object counts
-				for _ in range(n):
-					obj_count = np.random.randint(min_obj_count, max_obj_count + 1)
-					obj_cnts.append(obj_count)
+		print(f"[handle_prompt] vanilla pipeline generation took {time.time() - start_time:.2f}s")
 
-		return obj_cnts
-	
-	def sample_few_shot_samples(self, floor_area, n_objects, k=5):
-		floor_area = np.clip(floor_area, self.floor_min, self.floor_max)
-		floor_bin_idx = np.digitize(floor_area, self.floor_bins) - 1
-		floor_bin_idx = max(0, min(floor_bin_idx, len(self.floor_bins) - 2))
+		response_json = json.loads(response)
+		if response_json.get("commands") is None:
+			raise ValueError("No commands in response")
 
-		obj_bin_idx = n_objects - self.obj_min
-		obj_bin_idx = max(0, min(obj_bin_idx, len(self.conditional_probs[0]) - 1))
-		
-		key = (floor_bin_idx, obj_bin_idx)
-		obj_prompt_lists = []
-		
-		# Step 1: Try to get samples for the exact floor+object bin combination
-		if key in self.objects_lookup and self.objects_lookup[key]:
-			available = self.objects_lookup[key].copy()
-			random.shuffle(available)
-			obj_prompt_lists.extend(available[:min(k, len(available))])
-		
-		# Step 2: If we need more samples, collect all valid bins in the current floor area
-		if len(obj_prompt_lists) < k:
-			floor_bin_samples = []
-			for obj_bin in range(len(self.conditional_probs[0])):
-				test_key = (floor_bin_idx, obj_bin)
-				if test_key in self.objects_lookup and self.objects_lookup[test_key]:
-					floor_bin_samples.extend(self.objects_lookup[test_key])
-			
-			# If we have other samples from this floor bin, use them without duplicating
-			if floor_bin_samples:
-				# Filter out samples we've already taken
-				available_samples = [s for s in floor_bin_samples if s not in obj_prompt_lists]
-				random.shuffle(available_samples)
-				to_take = min(k - len(obj_prompt_lists), len(available_samples))
-				obj_prompt_lists.extend(available_samples[:to_take])
-		
-		# Step 3: If we still need more samples, search in adjacent floor bins
-		if len(obj_prompt_lists) < k:
-			# Create a list of all floor bins ordered by distance from current bin
-			floor_bins_by_distance = sorted(range(len(self.floor_bins)-1), key=lambda x: abs(x - floor_bin_idx))
-			
-			for floor_bin in floor_bins_by_distance:
-				if floor_bin == floor_bin_idx:  # Skip the current bin, already processed
+		return response_json["commands"]
+
+	def _run_removes_then_adds(self, current_scene, remove_commands, add_commands, do_skip_removals=False, do_rendering_with_object_count=False, pth_viz_output=None):
+		"""Process remove commands first, then add commands (shuffled or sequential)."""
+
+		# Step 1: Process REMOVE commands
+		if do_skip_removals and len(remove_commands) > 0:
+			print(f"Skipping {len(remove_commands)} remove commands (do_skip_removals=True)")
+		else:
+			for command in remove_commands:
+				prompt_obj = re.search(r'<remove>(.*?)</remove>', command).group(1).strip().lower()
+				if not prompt_obj:
+					print(f"Skipping empty remove command: {command}")
 					continue
-					
-				bin_samples = []
-				for obj_bin in range(len(self.conditional_probs[0])): # for each bin in all object bins
-					test_key = (floor_bin, obj_bin)
-					if test_key in self.objects_lookup and self.objects_lookup[test_key]:
-						bin_samples.extend(self.objects_lookup[test_key])
-				
-				if bin_samples:
-					# Filter out samples we've already taken
-					available_samples = [s for s in bin_samples if s not in obj_prompt_lists]
-					random.shuffle(available_samples)
-					to_take = min(k - len(obj_prompt_lists), len(available_samples))
-					obj_prompt_lists.extend(available_samples[:to_take])
-				
-				# Stop if we've reached our target
-				if len(obj_prompt_lists) >= k:
-					break
-		
-		# Step 4: Last resort - if somehow we still don't have enough samples,
-		# collect all samples from the entire histogram and sample randomly
-		if len(obj_prompt_lists) < k:
-			all_samples = []
-			for f_bin in range(len(self.floor_bins)-1):
-				for o_bin in range(len(self.conditional_probs[0])):
-					test_key = (f_bin, o_bin)
-					if test_key in self.objects_lookup and self.objects_lookup[test_key]:
-						all_samples.extend(self.objects_lookup[test_key])
-			
-			if all_samples:
-				# Filter out samples we've already taken
-				available_samples = [s for s in all_samples if s not in obj_prompt_lists]
-				
-				# If we've somehow used all samples already, allow reuse
-				if not available_samples and all_samples:
-					available_samples = all_samples
+				current_scene, _ = self.remove_object(
+					prompt_obj, current_scene,
+					do_rendering_with_object_count=do_rendering_with_object_count,
+					pth_viz_output=pth_viz_output,
+				)
 
-				random.shuffle(available_samples)
-				to_take = min(k - len(obj_prompt_lists), len(available_samples))
-				obj_prompt_lists.extend(available_samples[:to_take])
-		
-		# if we still don't have k samples, we need to reuse some
-		while len(obj_prompt_lists) < k and obj_prompt_lists:
-			obj_prompt_lists.append(random.choice(obj_prompt_lists))
+		scene_after_removals = copy.deepcopy(current_scene)
 
-		random.shuffle(obj_prompt_lists)
-		
-		return obj_prompt_lists[:k]
+		# Step 2: Process ADD commands
+		if len(add_commands) == 0:
+			if len(current_scene.get("objects", [])) > 0 or len(remove_commands) > 0:
+				return current_scene, True
+			raise ValueError("No commands to process")
 
-	def visualize(self) -> None:
-		fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 10))
-		im = ax1.imshow(
-			self.hist.T,
-			origin='lower', 
-			aspect='auto',
-			extent=[self.floor_min, self.floor_max, self.obj_min, self.obj_max],
-			cmap='viridis'
-		)
-		ax1.set_xlabel('Floor Area')
-		ax1.set_ylabel('Number of Objects')
-		ax1.set_title('2D Histogram of Floor Area vs. Object Count')
-		plt.colorbar(im, ax=ax1, label='Count')
-		im2 = ax2.imshow(
-			self.conditional_probs.T, 
-			origin='lower', 
-			aspect='auto',
-			extent=[self.floor_min, self.floor_max, self.obj_min, self.obj_max],
-			cmap='plasma'
-		)
-		ax2.set_xlabel('Floor Area')
-		ax2.set_ylabel('Number of Objects')
-		ax2.set_title('P(Objects | Floor Area)')
-		plt.colorbar(im2, ax=ax2, label='Probability')
-		plt.tight_layout()
-		plt.savefig("respace_full_floor_area_vs_object_count.png")
+		if self.do_bon_shuffling and len(add_commands) > 1:
+			best_scene, shuffle_success = self._run_shuffled_additions(
+				add_commands, scene_after_removals,
+				do_rendering_with_object_count=do_rendering_with_object_count,
+				pth_viz_output=pth_viz_output,
+			)
+			if shuffle_success:
+				return best_scene, True
+			raise ValueError("All shuffles failed")
+
+		# Standard sequential add
+		for command in add_commands:
+			prompt_obj = re.search(r'<add>(.*?)</add>', command).group(1).lower()
+			current_scene, _ = self.add_object(
+				prompt_obj, current_scene,
+				do_rendering_with_object_count=do_rendering_with_object_count,
+				pth_viz_output=pth_viz_output, temp=0.7,
+			)
+
+		if len(current_scene.get("objects", [])) > 0:
+			return current_scene, True
+		raise ValueError("No objects added")
+
+	def handle_prompt(self, prompt, current_scene=None, system_prompt=None, room_type=None, do_rendering_with_object_count=False, pth_viz_output=None, scene_id=None, all_commands=None, gt_steps=None, skip_per_step_eval=False, do_skip_removals=False):
+		if current_scene is None:
+			current_scene = self._sample_random_bounds(self.dataset_train, room_type)
+
+		if self.dataset_stats_for_prompt is None:
+			self.dataset_stats_for_prompt = self._prepare_dataset_stats_for_object_sampler(current_scene.get("room_type"))
+
+		if all_commands is not None:
+			# PATH B: pre-decomposed commands → run sequentially
+			return self._run_commands_sequential(
+				current_scene, all_commands, gt_steps=gt_steps,
+				skip_per_step_eval=skip_per_step_eval,
+				do_rendering_with_object_count=do_rendering_with_object_count,
+				pth_viz_output=pth_viz_output,
+			)
+		else:
+			# PATH A: decompose prompt via zero-shot LLM, then removes-first adds
+			use_loaded_prompts = self.load_prompts_from and scene_id and scene_id in self.saved_prompts
+
+			remaining_attempts = copy.copy(self.max_n_attempts)
+			while True:
+				try:
+					if use_loaded_prompts:
+						commands = self.saved_prompts[scene_id]["commands"]
+					else:
+						commands = self._decompose_prompt_to_commands(prompt, current_scene, system_prompt)
+
+					remove_commands = [c for c in commands if c.startswith("<remove>")]
+					add_commands    = [c for c in commands if c.startswith("<add>")]
+
+					print("=============================================")
+					print(f"Total: {len(commands)} commands ({len(remove_commands)} removes, {len(add_commands)} adds)")
+					print(f"Remove commands: {remove_commands}")
+					print(f"Add commands: {add_commands}")
+					print("=============================================")
+
+					current_scene, is_success = self._run_removes_then_adds(
+						current_scene, remove_commands, add_commands,
+						do_skip_removals=do_skip_removals,
+						do_rendering_with_object_count=do_rendering_with_object_count,
+						pth_viz_output=pth_viz_output,
+					)
+
+					if is_success and self.save_prompts_to and scene_id and not use_loaded_prompts:
+						self._save_prompts(scene_id, prompt, commands, current_scene)
+
+					return current_scene, is_success, None
+
+				except Exception as exc:
+					print(f"Error: {exc}")
+					traceback.print_exc()
+
+					if use_loaded_prompts:
+						print("Loaded prompts failed - not retrying")
+						return current_scene, False, None
+
+				if remaining_attempts > 0:
+					remaining_attempts -= 1
+					print(f"Retrying handle_prompt() ... {remaining_attempts} attempts left.")
+				else:
+					print("Max attempts reached. Returning current scene.")
+					return current_scene, False, None
+
+				gc.collect()
+				torch.cuda.empty_cache()

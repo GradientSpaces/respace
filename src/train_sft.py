@@ -3,11 +3,14 @@ from trl import SFTTrainer, SFTConfig
 from torch.utils.data import DataLoader
 import math
 from peft import get_peft_model
+import json
+import os
+import numpy as np
+import random
 
 from utils import init_wandb, get_lora_config
 from train import CustomTrainerCallback
-from utils import remove_and_recreate_folder
-from src.dataset import SFTSceneDataCollator, load_train_val_test_datasets, WeightedRandomSampler
+from src.dataset import SFTSceneDataCollator, process_scene_sample
 
 # class SFTSceneInstructionTrainer(SFTTrainer):
 # 	def __init__(self, *args, **kwargs):
@@ -28,10 +31,155 @@ from src.dataset import SFTSceneDataCollator, load_train_val_test_datasets, Weig
 # 		)
 
 # 	# for eval/test, just use regular sampling (one instruction per scene)
-# 	def get_eval_dataloader(self, eval_dataset=None):    
+# 	def get_eval_dataloader(self, eval_dataset=None):
 # 		return super().get_eval_dataloader(eval_dataset)
 
+def verify_augmentation_working(dataset_train, tokenizer, max_seq_length, args):
+	"""Rigorous verification that augmentation produces different geometries for the SAME object.
+
+	The key insight: we need to ensure create_instruction_from_scene() picks the same object
+	in both passes, then compare how that identical object gets augmented differently.
+	"""
+
+	print("\n" + "="*80)
+	print("VERIFYING DATA AUGMENTATION IS WORKING")
+	print("="*80 + "\n")
+
+	all_prompts = json.load(open(os.getenv("PTH_ASSETS_METADATA_PROMPTS")))
+	all_assets_metadata_simple_descs = json.load(open(os.getenv("PTH_ASSETS_METADATA_SIMPLE_DESCS")))
+
+	# Pick 5 random samples to verify
+	num_samples_to_check = 5
+	sample_indices = np.random.choice(len(dataset_train), num_samples_to_check, replace=False)
+
+	samples_pass1 = []
+	samples_pass2 = []
+
+	# Pass 1: Process samples
+	print("Pass 1: Processing samples with FIXED random state for object selection...")
+	for idx in sample_indices:
+		orig_sample = dataset_train[int(idx)]
+
+		# CRITICAL: Set seeds BEFORE process_scene_sample to control object selection
+		# This ensures create_instruction_from_scene picks the same object in both passes
+		np.random.seed(1234 + int(idx))  # Use idx-specific seed for diversity
+		random.seed(1234 + int(idx))
+		torch.manual_seed(1234 + int(idx))
+
+		full_instr, completion, prompt, sample = process_scene_sample(
+			orig_sample, tokenizer, max_seq_length,
+			all_prompts, all_assets_metadata_simple_descs,
+			args.do_simple_descs, True, args.do_full_sg_outputs
+		)
+
+		samples_pass1.append({
+			'idx': idx,
+			'sg_output_add': completion,
+			# 'sg_output_add': sample['sg_output_add'],
+			# 'sg_input': sample['sg_input'],
+			# 'desc': json.loads(sample['sg_output_add'])['desc']
+		})
+
+	# Pass 2: Process same samples again with SAME seeds for object selection
+	print("Pass 2: Processing same samples again with SAME object selection seeds...")
+	for idx in sample_indices:
+		orig_sample = dataset_train[int(idx)]
+
+		# Use SAME seed as Pass 1 to ensure same object is selected
+		np.random.seed(1234 + int(idx))
+		random.seed(1234 + int(idx))
+		torch.manual_seed(1234 + int(idx))
+
+		full_instr, completion, prompt, sample = process_scene_sample(
+			orig_sample, tokenizer, max_seq_length,
+			all_prompts, all_assets_metadata_simple_descs,
+			args.do_simple_descs, False, args.do_full_sg_outputs
+		)
+
+		samples_pass2.append({
+			'idx': idx,
+			'sg_output_add': completion,
+			#'sg_output_add': sample['sg_output_add'],
+			#'sg_input': sample['sg_input'],
+			#'desc': json.loads(sample['sg_output_add'])['desc']
+		})
+
+	# Compare the two passes
+	print("\n" + "-"*80)
+	print("COMPARISON RESULTS:")
+	print("-"*80 + "\n")
+
+	different_count = 0
+	same_object_count = 0
+
+	for i, (s1, s2) in enumerate(zip(samples_pass1, samples_pass2)):
+		# Extract object data from sg_output_add
+		obj1 = json.loads(s1['sg_output_add'])
+		obj2 = json.loads(s2['sg_output_add'])
+
+		# CRITICAL CHECK: Verify we're comparing the SAME object
+		same_object = (obj1['desc'] == obj2['desc'])
+		if same_object:
+			same_object_count += 1
+
+		# Compare geometries
+		pos_diff = np.linalg.norm(np.array(obj1['pos']) - np.array(obj2['pos']))
+		size_diff = np.linalg.norm(np.array(obj1['size']) - np.array(obj2['size']))
+
+		# Compare rotations (quaternions)
+		rot1 = np.array(obj1['rot'])
+		rot2 = np.array(obj2['rot'])
+		rot_diff = np.linalg.norm(rot1 - rot2)
+
+		is_different = (pos_diff > 0.001 or size_diff > 0.001 or rot_diff > 0.001)
+
+		if is_different:
+			different_count += 1
+
+		print(f"Sample {i} (idx={s1['idx']}):")
+		print(f"  Object match: {obj1['desc'][:50]} {'==' if same_object else '!='} {obj2['desc'][:50]}")
+		if same_object:
+			print(f"  Geometry: {'DIFFERENT' if is_different else 'IDENTICAL'}")
+			if is_different:
+				print(f"    Position diff: {pos_diff:.4f}")
+				print(f"    Size diff: {size_diff:.4f}")
+				print(f"    Rotation diff: {rot_diff:.4f}")
+		else:
+			print(f"  ✗ WARNING: Different objects selected (seed control failed!)")
+		print()
+
+	print("-"*80)
+	print(f"Object selection consistency: {same_object_count}/{num_samples_to_check} samples had same object")
+
+	if same_object_count < num_samples_to_check:
+		print("✗ CRITICAL: Seed control failed - not comparing same objects across passes!")
+		print("  The verification is invalid.")
+	elif args.do_augm:
+		if different_count == num_samples_to_check:
+			print(f"✓ AUGMENTATION WORKING: All {num_samples_to_check} samples produced different geometries")
+			print("  The SAME objects were augmented differently across passes.")
+		else:
+			print(f"✗ AUGMENTATION ISSUE: Only {different_count}/{num_samples_to_check} samples were different")
+			print("  Augmentation might not be applying geometric noise consistently.")
+	else:
+		if different_count == 0:
+			print(f"✓ NO AUGMENTATION: All {num_samples_to_check} samples were identical (as expected)")
+		else:
+			print(f"✗ UNEXPECTED: {different_count}/{num_samples_to_check} samples were different despite no augmentation")
+			print("  This indicates unwanted randomness in the pipeline.")
+
+	print("-"*80 + "\n")
+
+	exit()
+
+
 def run_sft_training(model, model_id, max_seq_length, tokenizer, accelerator, dataset_train, dataset_val, dataset_test, sampling_engine, dvc, args):
+
+	# VERIFICATION: Check if augmentation is working (only on main process, only in sanity check mode)
+	# if accelerator.is_main_process and args.do_sanity_check:
+	# 	verify_augmentation_working(dataset_train, tokenizer, max_seq_length, args)
+	# exit()
+
 	# LLPlace Paper:
 	# LoRA alpha value to 32, 
 	# the LoRA r value to 8, 

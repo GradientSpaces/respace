@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import random
 import os
+import gc
 from accelerate.utils import set_seed
 from shapely.geometry import Polygon
 import shutil
@@ -16,8 +17,6 @@ import wandb
 import time
 import logging
 from cleanfid.clip_features import CLIP_fx, img_preprocess_clip
-import shapely
-import trimesh
 
 def get_tgseed(seed):
 	g = torch.Generator()
@@ -35,9 +34,10 @@ def set_seeds(seed, use_determ=True):
 	
 	if use_determ:
 		torch.backends.cudnn.deterministic = True
-		torch.use_deterministic_algorithms(True)
+		torch.use_deterministic_algorithms(True, warn_only=True)
 	else:
 		torch.backends.cudnn.deterministic = False
+		# When disabling, don't use warn_only - fully disable
 		torch.use_deterministic_algorithms(False)
 	
 	# torch.backends.cudnn.benchmark = True
@@ -46,7 +46,17 @@ def set_seeds(seed, use_determ=True):
 	set_seed(seed) # HF accelerate
 
 def get_pth_mesh(asset_jid):
-	return os.path.join(os.getenv("PTH_3DFUTURE_ASSETS"), asset_jid, "raw_model.glb")
+	pth = os.path.join(os.getenv("PTH_3DFUTURE_ASSETS"), asset_jid, "raw_model.glb")
+	# check if pth exists, if not, try to find folder that starts with asset_jid and use that path
+	if not os.path.exists(pth):
+		base_dir = os.getenv("PTH_3DFUTURE_ASSETS")
+		for folder_name in os.listdir(base_dir):
+			if folder_name.startswith(asset_jid):
+				pth_candidate = os.path.join(base_dir, folder_name, "raw_model.glb")
+				if os.path.exists(pth_candidate):
+					pth = pth_candidate
+					break
+	return pth
 
 def create_floor_plan_polygon(bounds):
 	return Polygon(np.array(bounds)[:, [0, 2]].tolist())
@@ -77,7 +87,10 @@ def precompute_fid_scores_for_caching(fid_score_name, pth_dataset):
 		fid.remove_custom_stats(fid_score_name, model_name="clip_vit_b_32", mode="clean")
 	fid.make_custom_stats(fid_score_name, pth_dataset, model_name="clip_vit_b_32", mode="clean")
 
-def compute_fid_scores(fid_prefix, fid_score_name, pth_src, pth_gen, do_renderings, aggregated_metrics, dataset_res=1024):
+def compute_fid_scores(fid_prefix, fid_score_name, pth_src, pth_gen, do_renderings, aggregated_metrics, dataset_res=1024, do_rectangular_only=False):
+
+	if do_rectangular_only:
+		fid_score_name = f"{fid_score_name}_rectangular"
 
 	if do_renderings == False or (not os.path.exists(pth_gen)) or (len(os.listdir(pth_gen)) < 2):
 		print("skipping FID computation")
@@ -264,6 +277,53 @@ def get_room_type_from_id(room_id):
 		return "livingroom"
 	return "other"
 
+def is_rectangular_room(bounds_bottom):
+	"""Check if a room is rectangular"""
+	if len(bounds_bottom) != 4:
+		return False
+	
+	coords = [(pt[0], pt[2]) for pt in bounds_bottom]
+	x_vals = sorted(set(coord[0] for coord in coords))
+	z_vals = sorted(set(coord[1] for coord in coords))
+	
+	if len(x_vals) != 2 or len(z_vals) != 2:
+		return False
+	
+	expected_corners = {
+		(x_vals[0], z_vals[0]), (x_vals[0], z_vals[1]),
+		(x_vals[1], z_vals[0]), (x_vals[1], z_vals[1])
+	}
+	actual_corners = set(coords)
+	
+	return expected_corners == actual_corners
+
+def find_removed_objects(scene_before, scene_after):
+	"""Returns list of objects that were in scene_before but not in scene_after"""
+	before_uuids = {obj["uuid"] for obj in scene_before["objects"]}
+	after_uuids = {obj["uuid"] for obj in scene_after["objects"]}
+	removed_uuids = before_uuids - after_uuids
+	return [obj for obj in scene_before["objects"] if obj["uuid"] in removed_uuids]
+
+def classify_confusion_type(target_category, removed_categories):
+	"""
+	Classifies the type of confusion based on removed object categories.
+	Returns: "only_same", "only_different", "mixed", or None (if nothing removed)
+	"""
+	if not removed_categories:
+		return None
+	
+	same_category = [cat for cat in removed_categories if cat == target_category]
+	diff_category = [cat for cat in removed_categories if cat != target_category]
+	
+	if same_category and not diff_category:
+		return "only_same"
+	elif diff_category and not same_category:
+		return "only_different"
+	elif same_category and diff_category:
+		return "mixed"
+	else:
+		return None
+
 def create_category_lookup(all_assets_metadata_orig, all_assets_metadata):
 	jid_to_category = {}
 	for item in all_assets_metadata_orig:
@@ -416,7 +476,7 @@ def get_sft_model(model_id, args, accelerator):
 	else:
 		model, _, max_seq_length = get_model(f"./ckpts/{args.test_ckpt}", args.use_gpu, accelerator)
 
-		print(f"[ idx {accelerator.process_index}] dense model loaded successfully")
+		print(f"[ idx {accelerator.process_index} ] dense model loaded successfully")
 
 		return model, max_seq_length, None, None
 
@@ -449,3 +509,175 @@ class StreamToLogger(object):
 
 	def isatty(self):
 		return False
+
+def create_vllm_engine(model_path, max_seq_length, gpu_memory_utilization=0.4, device="cuda:0"):
+	"""Create a vLLM engine with the standard monkey patches.
+
+	CRITICAL: This function handles the deterministic algorithms issue that causes:
+	RuntimeError: cumsum_cuda_kernel does not have a deterministic implementation
+
+	The issue occurs because vLLM's sampling uses cumsum in worker processes.
+	We must disable deterministic algorithms BEFORE vLLM spawns workers.
+	"""
+	from unittest.mock import patch
+	import subprocess
+
+	# CRITICAL FIX: Disable deterministic algorithms in current process
+	# This must happen BEFORE importing vLLM so workers inherit this state
+	was_deterministic = torch.are_deterministic_algorithms_enabled()
+	was_cudnn_deterministic = torch.backends.cudnn.deterministic
+
+	torch.use_deterministic_algorithms(False)
+	torch.backends.cudnn.deterministic = False
+	torch.backends.cudnn.benchmark = True
+
+	# CRITICAL: Temporarily unset CUBLAS_WORKSPACE_CONFIG to allow non-deterministic ops
+	# This env var forces deterministic cuBLAS operations, which breaks vLLM's cumsum
+	cublas_config = os.environ.get('CUBLAS_WORKSPACE_CONFIG')
+	if cublas_config:
+		del os.environ['CUBLAS_WORKSPACE_CONFIG']
+		print(f"[vLLM] Removed CUBLAS_WORKSPACE_CONFIG={cublas_config}")
+	else:
+		print(f"[vLLM] CUBLAS_WORKSPACE_CONFIG already unset")
+
+	print(f"[vLLM] State before import: deterministic={torch.are_deterministic_algorithms_enabled()}, cudnn.deterministic={torch.backends.cudnn.deterministic}, CUBLAS={os.environ.get('CUBLAS_WORKSPACE_CONFIG', 'NOT SET')}")
+
+	# Force environment to be clean for vLLM workers
+	# Check if it's actually unset at the OS level
+	result = subprocess.run(['printenv', 'CUBLAS_WORKSPACE_CONFIG'], capture_output=True, text=True)
+	if result.returncode == 0:
+		print(f"[vLLM] WARNING: CUBLAS_WORKSPACE_CONFIG still set at OS level: {result.stdout.strip()}")
+	else:
+		print(f"[vLLM] Confirmed: CUBLAS_WORKSPACE_CONFIG not in environment")
+
+	# NUCLEAR OPTION: Monkey-patch torch to permanently disable deterministic algorithms
+	# This prevents vLLM workers from re-enabling them
+	original_use_deterministic = torch.use_deterministic_algorithms
+	original_are_deterministic = torch.are_deterministic_algorithms_enabled
+
+	def patched_use_deterministic(mode, *, warn_only=False):
+		"""Patched version that ignores attempts to enable deterministic mode"""
+		# if mode:
+			# print(f"[vLLM] Blocked attempt to enable deterministic algorithms")
+		# Always call with False
+		return original_use_deterministic(False, warn_only=warn_only)
+
+	def patched_are_deterministic():
+		"""Always return False"""
+		return False
+
+	torch.use_deterministic_algorithms = patched_use_deterministic
+	torch.are_deterministic_algorithms_enabled = patched_are_deterministic
+	print(f"[vLLM] Monkey-patched torch deterministic functions")
+
+	from vllm import LLM
+
+	world_size_patch = patch("torch.distributed.get_world_size", return_value=1)
+	profiling_patch = patch(
+		"vllm.worker.worker.Worker._assert_memory_footprint_increased_during_profiling",
+		return_value=None
+	)
+	with world_size_patch, profiling_patch:
+		llm_engine = LLM(
+			model=model_path,
+			device=device,
+			gpu_memory_utilization=gpu_memory_utilization,
+			dtype="auto",
+			enable_prefix_caching=True,
+			max_model_len=max_seq_length,
+		)
+	print("vLLM engine ready!")
+
+	# DON'T restore the monkey-patch yet! Keep it active while vLLM is in use
+	# We'll restore it when destroy_vllm_engine() is called
+	print(f"[vLLM] Keeping monkey-patch active during vLLM usage")
+
+	# Store the previous state, env var, AND original functions so we can restore them later
+	llm_engine._claude_was_deterministic = was_deterministic
+	llm_engine._claude_was_cudnn_deterministic = was_cudnn_deterministic
+	llm_engine._claude_cublas_config = cublas_config
+	llm_engine._claude_original_use_deterministic = original_use_deterministic
+	llm_engine._claude_original_are_deterministic = original_are_deterministic
+
+	return llm_engine
+
+def destroy_vllm_engine(llm_engine, restore_deterministic=False):
+	"""Clean up a vLLM engine and free GPU memory.
+
+	Args:
+		llm_engine: The vLLM engine to destroy
+		restore_deterministic: If True, restore the deterministic algorithms state from before vLLM was created
+	"""
+	from vllm.distributed.parallel_state import destroy_model_parallel
+
+	# Restore monkey-patched functions FIRST (before deleting engine)
+	original_use_deterministic = getattr(llm_engine, '_claude_original_use_deterministic', None)
+	original_are_deterministic = getattr(llm_engine, '_claude_original_are_deterministic', None)
+
+	if original_use_deterministic and original_are_deterministic:
+		torch.use_deterministic_algorithms = original_use_deterministic
+		torch.are_deterministic_algorithms_enabled = original_are_deterministic
+		print(f"[vLLM] Restored original torch deterministic functions")
+
+	# Get other state to restore
+	was_deterministic = getattr(llm_engine, '_claude_was_deterministic', None)
+	was_cudnn_deterministic = getattr(llm_engine, '_claude_was_cudnn_deterministic', None)
+	cublas_config = getattr(llm_engine, '_claude_cublas_config', None)
+
+	# Identify which device the engine was on before deleting it
+	engine_device = None
+	try:
+		if hasattr(llm_engine, 'llm_engine') and hasattr(llm_engine.llm_engine, 'device_config'):
+			engine_device = llm_engine.llm_engine.device_config.device
+		elif hasattr(llm_engine, 'llm_engine') and hasattr(llm_engine.llm_engine, 'model_executor'):
+			engine_device = getattr(llm_engine.llm_engine.model_executor, 'device', None)
+	except Exception:
+		pass
+
+	destroy_model_parallel()
+	del llm_engine
+	time.sleep(3.0)
+	gc.collect()
+	torch.cuda.empty_cache()
+
+	# Also explicitly clear the specific GPU device the engine was on
+	# torch.cuda.empty_cache() only clears the current device's cache by default
+	for device_idx in range(torch.cuda.device_count()):
+		with torch.cuda.device(device_idx):
+			torch.cuda.empty_cache()
+
+	time.sleep(3.0)
+	gc.collect()
+
+	# Log memory state after cleanup
+	for device_idx in range(torch.cuda.device_count()):
+		allocated = torch.cuda.memory_allocated(device_idx) / (1024**3)
+		reserved = torch.cuda.memory_reserved(device_idx) / (1024**3)
+		print(f"[vLLM] GPU {device_idx} after cleanup: allocated={allocated:.2f} GiB, reserved={reserved:.2f} GiB")
+
+	print("vLLM engine purged!")
+
+	# Restore CUBLAS config if it was set before
+	if cublas_config:
+		os.environ['CUBLAS_WORKSPACE_CONFIG'] = cublas_config
+		print(f"[vLLM] Restored CUBLAS_WORKSPACE_CONFIG={cublas_config}")
+
+	# Restore deterministic algorithms state if requested
+	if restore_deterministic:
+		if was_deterministic is not None:
+			torch.use_deterministic_algorithms(was_deterministic)
+			print(f"[vLLM] Restored torch deterministic: {was_deterministic}")
+		if was_cudnn_deterministic is not None:
+			torch.backends.cudnn.deterministic = was_cudnn_deterministic
+			print(f"[vLLM] Restored cudnn deterministic: {was_cudnn_deterministic}")
+
+MAX_DESC_WORDS = 40  # max in training set is 39; anything above is description inflation
+
+def is_high_quality_sample(delta_pbl_loss, txt_pms_sampled_score, size_l2_dist, txt_dss_score=None, desc=None):
+	if desc is not None and len(desc.split()) > MAX_DESC_WORDS:
+		return False
+	return (
+		delta_pbl_loss < 1e-5
+		and txt_pms_sampled_score > 0.85
+		and size_l2_dist < 0.5
+	)

@@ -25,9 +25,10 @@ import pandas as pd
 import cv2
 import imageio.v2 as imageio
 import math
+import shutil
 
-from src.utils import get_pth_mesh, create_floor_plan_polygon, remove_and_recreate_folder, precompute_fid_scores_for_caching, get_pths_dataset_split, get_model, get_test_instrs_all
-from src.dataset import load_train_val_test_datasets, create_full_scene_from_before_and_added, create_instruction_from_scene, process_scene_sample
+from src.utils import get_pth_mesh, create_floor_plan_polygon, remove_and_recreate_folder, precompute_fid_scores_for_caching, get_pths_dataset_split, get_model, is_rectangular_room
+from src.dataset import load_train_val_test_datasets, create_full_scene_from_before_and_added, process_scene_sample
 
 # Add this before your rendering code
 import ctypes
@@ -920,14 +921,19 @@ def render_instr_scene_and_export_with_gif(scene_after, filename, pth_output, re
 		create_instr_before_after_gif(scene_after, filename, pth_output, "top", resolution, use_dynamic_zoom, camera_height, gif_duration)
 		create_instr_before_after_gif(scene_after, filename, pth_output, "diag", resolution, use_dynamic_zoom, camera_height, gif_duration)
 
-def render_full_scenes_for_room_type(room_type, pth_root, pth_folder_prefix, pth_output):
+def render_full_scenes_for_room_type(room_type, pth_root, pth_folder_prefix, pth_output, do_rectangular_only=False):
 
 	folder_name = f"{pth_folder_prefix}-{room_type}"
 	pth_output_full = pth_output / folder_name
 	remove_and_recreate_folder(pth_output_full)
 
-	# we take the full train split if less than 5K, otherwise we sample 5K
 	all_pths = get_pths_dataset_split(room_type, "train")
+
+	if do_rectangular_only:
+		print("filtering for rectangular rooms only...")
+		all_pths = [pth for pth in all_pths if is_rectangular_room(json.load(open(os.path.join(pth_root, pth), "r")).get("bounds_bottom"))]
+
+	# we take the full train split if less than 5K, otherwise we sample 5K
 	if len(all_pths) > 5000:
 		all_pths = np.random.choice(all_pths, 5000, replace=False)
 	
@@ -939,12 +945,26 @@ def render_full_scenes_for_room_type(room_type, pth_root, pth_folder_prefix, pth
 	for pth in pbar:
 		scene = json.load(open(os.path.join(pth_root, pth), "r"))
 		scene_id = pth.split(".")[0]
-		render_full_scene_and_export_with_gif(scene, filename=scene_id, pth_output=pth_output_full, create_gif=False)
+		
+		if do_rectangular_only:
+			# copy paste from original train WITHOUT "-rectangular" suffix in folder_name
+			folder_name_orig = f"{pth_folder_prefix.replace('-rectangular', '')}-{room_type}"
+			pth_output_full_orig = pth_output / folder_name_orig
+			# copy paste file into our folder if file exists already
+			src_pth = pth_output_full_orig / "top" / f"{scene_id}.jpg"
+			src_tgt = pth_output_full / "top" / f"{scene_id}.jpg"
+			if os.path.exists(src_pth):
+				shutil.copy(src_pth, src_tgt)
+			else:
+				render_full_scene_and_export_with_gif(scene, filename=scene_id, pth_output=pth_output_full, create_gif=False)
+		else:
+			render_full_scene_and_export_with_gif(scene, filename=scene_id, pth_output=pth_output_full, create_gif=False)
+		
 		cnt += 1
 		pbar.set_description(f"Rendering scenes (# {cnt})")
 
 	precompute_fid_scores_for_caching(f"{folder_name}-top", str(pth_output_full / "top"))
-	precompute_fid_scores_for_caching(f"{folder_name}-diag", str(pth_output_full / "diag"))
+	# precompute_fid_scores_for_caching(f"{folder_name}-diag", str(pth_output_full / "diag"))
 	
 	print(f"rendered all scenes for room type: {room_type}, total: {cnt}")
 
@@ -1570,11 +1590,15 @@ def run_viz_for_full_training_dataset():
 	# render_full_scenes_for_room_type("livingroom", pth_root, pth_folder_prefix, pth_output_base)
 	# render_full_scenes_for_room_type("all", pth_root, pth_folder_prefix, pth_output_base)
 
+	# render full scenes (rectangular only, just copy paste existing ones into folder)
+	pth_folder_prefix = "3d-front-train-full-scenes-rectangular"
+	render_full_scenes_for_room_type("all", pth_root, pth_folder_prefix, pth_output_base, do_rectangular_only=True)
+
 	# # render instr scenes
-	pth_folder_prefix = "3d-front-train-instr-scenes"
-	render_instr_scenes_for_room_type("bedroom", pth_root, pth_folder_prefix, pth_output_base)
-	render_instr_scenes_for_room_type("livingroom", pth_root, pth_folder_prefix, pth_output_base)
-	render_instr_scenes_for_room_type("all", pth_root, pth_folder_prefix, pth_output_base)
+	# pth_folder_prefix = "3d-front-train-instr-scenes"
+	# render_instr_scenes_for_room_type("bedroom", pth_root, pth_folder_prefix, pth_output_base)
+	# render_instr_scenes_for_room_type("livingroom", pth_root, pth_folder_prefix, pth_output_base)
+	# render_instr_scenes_for_room_type("all", pth_root, pth_folder_prefix, pth_output_base)
 		
 if __name__ == "__main__":
 
@@ -1583,6 +1607,20 @@ if __name__ == "__main__":
 	
 	# run_viz_for_full_training_dataset()
 	# xvfb-run -a python src/viz.py
+
+	# render single sample in /eval/viz/misc/custom
+	pth_output = Path("./eval/viz/misc/custom-2")
+	remove_and_recreate_folder(pth_output)
+	
+	pth = "/home/martinbucher/git/stan-24-sgllm/eval/samples/respace/full/all-with-qwen1.5b-all-grpo-bon-1-aug01/json/1234/69_1234.json"
+	scene = json.load(open(pth, "r"))
+	scene_id = pth.split("/")[-1].split(".")[0]
+	render_scene_and_export(scene, filename=f"{scene_id}_grpo", pth_output=pth_output, resolution=(1536, 1024), show_bboxes=False, show_assets=True, use_dynamic_zoom=True, camera_height=5.5)
+
+	pth = "/home/martinbucher/git/stan-24-sgllm/eval/samples/respace/full/all-with-qwen1.5b-all-bon-1-aug01/json/1234/69_1234.json"
+	scene = json.load(open(pth, "r"))
+	scene_id = pth.split("/")[-1].split(".")[0]
+	render_scene_and_export(scene, filename=f"{scene_id}_sft", pth_output=pth_output, resolution=(1536, 1024), show_bboxes=False, show_assets=True, use_dynamic_zoom=True, camera_height=5.5)
 
 	# metrics_raw = json.load(open("/home/martinbucher/git/stan-24-sgllm/eval/metrics-raw/eval_samples_respace_instr_bedroom_qwen1.5B_raw.json"))
 	# metrics_raw = json.load(open("/home/martinbucher/git/stan-24-sgllm/eval/metrics-raw/eval_samples_respace_instr_livingroom_qwen1.5B_raw.json"))

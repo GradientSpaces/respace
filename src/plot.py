@@ -11,10 +11,12 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import pandas as pd
 import glob
+from collections import defaultdict
+import random
 
 from src.sample import AssetRetrievalModule
-from src.utils import get_pth_mesh, create_floor_plan_polygon, remove_and_recreate_folder, precompute_fid_scores_for_caching, get_pths_dataset_split, get_model, get_test_instrs_all
-from src.dataset import load_train_val_test_datasets, create_full_scene_from_before_and_added, create_instruction_from_scene, process_scene_sample
+from src.utils import create_floor_plan_polygon, remove_and_recreate_folder, get_pths_dataset_split, get_test_instrs_all
+from src.dataset import create_full_scene_from_before_and_added
 from src.viz import render_full_scene_and_export_with_gif, create_360_video_instr, create_360_video_full, create_360_video_voxelization, create_360_videos_assets
 from src.eval import eval_scene
 
@@ -28,14 +30,14 @@ def plot_ablation_fid_kid_pbl_pms(title, x_name, x_values, fid_scores, kid_score
 	# Plot 1: FID and KID Scores
 	ax1 = axes[0]
 	ax1_twin = ax1.twinx()
-	ax1.plot(bon_values, fid_scores, 'g-', marker='o')
-	ax1_twin.plot(bon_values, kid_scores, 'b-', marker='o')
+	ax1.plot(x_values, fid_scores, 'g-', marker='o')
+	ax1_twin.plot(x_values, kid_scores, 'b-', marker='o')
 	ax1.set_xlabel(x_name)
 	ax1.set_ylabel('FID Score', color='g')
 	ax1_twin.set_ylabel('KID Score', color='b')
 	ax1.set_title(f'FID and KID Scores vs {x_name}')
-	ax1.set_xticks(bon_values)
-	ax1.set_xticklabels(bon_values, rotation=45)
+	ax1.set_xticks(x_values)
+	ax1.set_xticklabels(x_values, rotation=45)
 	ax1.tick_params(axis='y', labelcolor='g')
 	ax1_twin.tick_params(axis='y', labelcolor='b')
 	#ax1.set_ylim(39.5, 40.5)
@@ -44,23 +46,23 @@ def plot_ablation_fid_kid_pbl_pms(title, x_name, x_values, fid_scores, kid_score
 	
 	# Plot 2: Delta PBL
 	ax2 = axes[1]
-	ax2.plot(bon_values, delta_pbl, 'g-', marker='o')
+	ax2.plot(x_values, delta_pbl, 'g-', marker='o')
 	ax2.set_xlabel(x_name)
 	ax2.set_ylabel('Delta PBL')
 	ax2.set_title(f'Delta PBL vs {x_name}')
-	ax2.set_xticks(bon_values)
-	ax2.set_xticklabels(bon_values, rotation=45)
+	ax2.set_xticks(x_values)
+	ax2.set_xticklabels(x_values, rotation=45)
 	#ax2.set_ylim(0, 0.03)
 	ax2.grid(alpha=0.3)
 	
 	# Plot 3: PMS Score
 	ax3 = axes[2]
-	ax3.plot(bon_values, pms_score, 'g-', marker='o')
+	ax3.plot(x_values, pms_score, 'g-', marker='o')
 	ax3.set_xlabel(x_name)
 	ax3.set_ylabel('PMS Score')
 	ax3.set_title(f'PMS Score vs {x_name}')
-	ax3.set_xticks(bon_values)
-	ax3.set_xticklabels(bon_values, rotation=45)
+	ax3.set_xticks(x_values)
+	ax3.set_xticklabels(x_values, rotation=45)
 	#ax3.set_ylim(0.7, 0.8)
 	ax3.grid(alpha=0.3)
 	
@@ -131,7 +133,7 @@ def plot_stats_per_n_objects_instr(room_type, postfix, n_aggregate_per=2):
 	times_new_roman_size = 36
 	
 	# Better blue color palette - more coherent and professional
-	blue_colors = ['#78a5cc', '#286bad', '#0D3A66', '#011733']  # Ordered from lighter to darker
+	blue_colors = ['#78a5cc', "#3d79b4", "#29619A", "#13417D"]  # Ordered from lighter to darker
 	
 	# Get delta_pbl results for each model
 	n_objects_sorted1, delta_pbl_mean1, delta_pbl_std1, _, _ = get_stats_per_n_object_from_file(
@@ -219,7 +221,7 @@ def plot_stats_per_n_objects_instr(room_type, postfix, n_aggregate_per=2):
 		end = start + n_aggregate_per - 1
 		x_tick_labels.append(f"{start}-{end}")
 	
-	ax1.set_title(f"Delta VBL / Instr — ‘{room_type.split('-')[0]}’ dataset", fontsize=times_new_roman_size)
+	ax1.set_title(f"Delta VBL — ‘{room_type.split('-')[0]}’ dataset", fontsize=times_new_roman_size)
 	
 	# Create smaller font size for labels
 	# label_font = fm.FontProperties(fname='/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf')
@@ -374,7 +376,9 @@ def render_comparison(mode, row_type, pth_root, pth_folder_fig_prefix, seed_and_
 		render_full_scene_and_export_with_gif(scene, filename="0-2", pth_output=pth_folder_fig, create_gif=False, bg_color=bg_color, camera_height=camera_height)
 		
 		# render ours
-		scene = json.load(open(f"{pth_root}/respace/{mode}/{room_type}{'-with-qwen1.5b-all-grpo-bon-1'}/json/{seed_and_idx[0]}/{seed_and_idx[1]}_{seed_and_idx[0]}.json", "r"))
+		# scene = json.load(open(f"{pth_root}/respace/{mode}/{room_type}{'-with-qwen1.5b-all-grpo-bon-1'}/json/{seed_and_idx[0]}/{seed_and_idx[1]}_{seed_and_idx[0]}.json", "r"))
+		scene = json.load(open(f"{pth_root}/respace/{mode}/{room_type}{'-rej-n512fixed-1e5-bon-1'}/json/{seed_and_idx[0]}/{seed_and_idx[1]}_{seed_and_idx[0]}.json", "r"))
+		# scene = json.load(open(f"{pth_root}/respace/{mode}/{'all'}{'-rej-n512fixed-1e5-bon-1-shuffling-8'}/json/{seed_and_idx[0]}/{seed_and_idx[1]}_{seed_and_idx[0]}.json", "r"))
 		render_full_scene_and_export_with_gif(scene, filename="0-3", pth_output=pth_folder_fig, create_gif=False, bg_color=bg_color, camera_height=camera_height)
 		
 		# render GT or special version
@@ -396,12 +400,13 @@ def render_comparison(mode, row_type, pth_root, pth_folder_fig_prefix, seed_and_
 				render_full_scene_and_export_with_gif(scene, filename="0-4", pth_output=pth_folder_fig, create_gif=False, bg_color=bg_color, camera_height=camera_height)
 			else:
 				# take BON8 sample as last column
-				scene = json.load(open(f"{pth_root}/respace/{mode}/{room_type}{'-with-qwen1.5b-all-grpo-bon-8'}/json/{seed_and_idx[0]}/{seed_and_idx[1]}_{seed_and_idx[0]}.json", "r"))
+				# scene = json.load(open(f"{pth_root}/respace/{mode}/{room_type}{'-with-qwen1.5b-all-grpo-bon-8'}/json/{seed_and_idx[0]}/{seed_and_idx[1]}_{seed_and_idx[0]}.json", "r"))
+				scene = json.load(open(f"{pth_root}/respace/{mode}/{room_type}{'-rej-n512fixed-1e5-bon-1-shuffling-8-fast'}/json/{seed_and_idx[0]}/{seed_and_idx[1]}_{seed_and_idx[0]}.json", "r"))
 				render_full_scene_and_export_with_gif(scene, filename="0-4", pth_output=pth_folder_fig, create_gif=False, bg_color=bg_color, camera_height=camera_height)
 		
 		return None
 
-def plot_qualitative_figure_comparison(mode, num_rows=4, sample_data=None, camera_heights=None, is_supp=False, asset_sampling=False, num_asset_samples=0):
+def plot_qualitative_figure_comparison(mode, num_rows=4, sample_data=None, camera_heights=None, is_supp=False, asset_sampling=False, num_asset_samples=0, skip_scene_before=False):
 	plt.rcParams['font.family'] = 'STIXGeneral'
 	plt.rcParams['mathtext.fontset'] = 'stix' 
 	plt.rcParams['font.size'] = 12
@@ -443,6 +448,9 @@ def plot_qualitative_figure_comparison(mode, num_rows=4, sample_data=None, camer
 		else:
 			plot_figsize = (5*(num_asset_samples+1), (3.6*num_rows))
 			num_cols = num_asset_samples + 1  # before, samples
+	elif skip_scene_before:
+		num_cols = 4  # ATISS, Mi-Diff, Ours, GT (no "Scene Before")
+		plot_figsize = (4.5*num_cols, 3.4*num_rows)
 	else:
 		if mode == "instr":
 			plot_figsize = (5*5, 2.5*5)
@@ -459,8 +467,10 @@ def plot_qualitative_figure_comparison(mode, num_rows=4, sample_data=None, camer
 	for row_type, sample in sample_data.items():
 		row_prefix = f"{pth_folder_fig_prefix}-{row_type}"
 		
+		col_offset = 1 if skip_scene_before else 0  # skip 0-0.jpg (empty floor plan)
 		for col_idx in range(num_cols):
-			img_path = Path(f"{row_prefix}") / "diag" / f"0-{col_idx}.jpg"
+			img_col = col_idx + col_offset  # map to rendered image index
+			img_path = Path(f"{row_prefix}") / "diag" / f"0-{img_col}.jpg"
 			if os.path.exists(img_path):
 				img = Image.open(img_path)
 				width, height = img.size
@@ -480,13 +490,13 @@ def plot_qualitative_figure_comparison(mode, num_rows=4, sample_data=None, camer
 					else:
 						crop_top = int(height * 0.15)
 						crop_bottom = int(height * 0.85)
-				
+
 				# Crop the image (left, top, right, bottom)
 				cropped_img = img.crop((0, crop_top, width, crop_bottom))
-				
+
 				# Display the cropped image
 				axs[row_idx, col_idx].imshow(cropped_img)
-			
+
 			axs[row_idx, col_idx].axis('off')
 		
 		# Load metrics for this row if not asset sampling
@@ -496,21 +506,27 @@ def plot_qualitative_figure_comparison(mode, num_rows=4, sample_data=None, camer
 			row_metrics = all_metrics[row_type]  # Already computed on-the-fly
 		
 		# Add metric text to plot
-		add_metrics_to_plot(axs, row_idx, row_metrics, mode=mode, is_supp=is_supp, asset_sampling=asset_sampling, num_asset_samples=num_asset_samples)
-		
+		add_metrics_to_plot(axs, row_idx, row_metrics, mode=mode, is_supp=is_supp, asset_sampling=asset_sampling, num_asset_samples=num_asset_samples, skip_scene_before=skip_scene_before)
+
 		row_idx += 1
-	
+
 	# Set titles for columns
-	set_column_titles(mode, axs, is_supp=is_supp, asset_sampling=asset_sampling, num_asset_samples=num_asset_samples)
+	set_column_titles(mode, axs, is_supp=is_supp, asset_sampling=asset_sampling, num_asset_samples=num_asset_samples, skip_scene_before=skip_scene_before)
 	
 	# Adjust layout
-	if mode == "instr":
+	if skip_scene_before:
+		fig.subplots_adjust(left=0.0, right=1.0, top=0.92, bottom=0.0, hspace=0.05, wspace=0.02)
+	elif mode == "instr":
 		# instr
 		# fig.subplots_adjust(left=0.015, right=1.0, top=0.95, bottom=0.0, hspace=0.05, wspace=0.0)
 		fig.subplots_adjust(left=0.015, right=1.0, top=0.93, bottom=0.0, hspace=0.05, wspace=0.0)
 	else:
 		# full
-		fig.subplots_adjust(left=0.0, right=1.0, top=0.92, bottom=0.0, hspace=0.1, wspace=0.0)
+		if is_supp:
+			fig.subplots_adjust(left=0.0, right=1.0, top=0.98, bottom=0.0, hspace=0.1, wspace=0.0)
+		else:
+			fig.subplots_adjust(left=0.0, right=1.0, top=0.92, bottom=0.0, hspace=0.1, wspace=0.0)
+
 	
 	# Determine filename based on settings
 	if asset_sampling:
@@ -558,8 +574,12 @@ def load_metrics_for_row(row_type, mode, sample, seed_idx_lookup, asset_sampling
 	metrics_midiff = json.load(open(midiff_file, "r"))[seed_idx][idx]
 	
 	# Load metrics for Ours
-	ours_file = f"{base_path}eval_samples_respace_{mode}_{dataset_type}-with-qwen1.5b-all-grpo-bon-1_qwen1.5b-all-grpo-bon-1_raw.json"
-	ours_file_bon8 = f"{base_path}eval_samples_respace_{mode}_{dataset_type}-with-qwen1.5b-all-grpo-bon-8_qwen1.5b-all-grpo-bon-8_raw.json"
+
+	# ours_file = f"{base_path}eval_samples_respace_{mode}_{dataset_type}-with-qwen1.5b-all-grpo-bon-1_qwen1.5b-all-grpo-bon-1_raw.json"
+	ours_file = f"{base_path}eval_samples_respace_{mode}_{dataset_type}-rej-n512fixed-1e5-bon-1-shuffling-1_raw.json"
+	
+	# ours_file_bon8 = f"{base_path}eval_samples_respace_{mode}_{dataset_type}-with-qwen1.5b-all-grpo-bon-8_qwen1.5b-all-grpo-bon-8_raw.json"
+	ours_file_bon8 = f"{base_path}eval_samples_respace_{mode}_{dataset_type}-rej-n512fixed-1e5-bon-1-shuffling-8-fast_raw.json"
 	
 	metrics_ours = json.load(open(ours_file, "r"))[seed_idx][idx]
 	metrics_ours_bon8 = json.load(open(ours_file_bon8, "r"))[seed_idx][idx] if os.path.exists(ours_file_bon8) else None
@@ -572,13 +592,13 @@ def load_metrics_for_row(row_type, mode, sample, seed_idx_lookup, asset_sampling
 	}
 
 
-def add_metrics_to_plot(axs, row_idx, metrics, mode="instr", is_supp=False, asset_sampling=False, num_asset_samples=0):
+def add_metrics_to_plot(axs, row_idx, metrics, mode="instr", is_supp=False, asset_sampling=False, num_asset_samples=0, skip_scene_before=False):
 	metric_font_size = 16
-	
+
 	# Handle asset sampling differently
 	if asset_sampling:
 		textbox_contents = [""]  # First column has no metrics
-		
+
 		for i in range(num_asset_samples):
 			if mode == "instr":
 				# For "instr" mode, use delta metrics with delta symbol
@@ -590,11 +610,11 @@ def add_metrics_to_plot(axs, row_idx, metrics, mode="instr", is_supp=False, asse
 				textbox_contents.append(
 					f"OOB: {round(metrics[i].get('total_oob_loss', 0), 2)} / MBL: {round(metrics[i].get('total_mbl_loss', 0), 2)}"
 				)
-		
+
 		# Add empty string for the GT column if in instr mode
 		if mode == "instr":
 			textbox_contents.append("")
-	
+
 	# Original implementation for method comparison
 	else:
 		if mode == "instr":
@@ -605,6 +625,14 @@ def add_metrics_to_plot(axs, row_idx, metrics, mode="instr", is_supp=False, asse
 				f"Δ OOB: {round(metrics['midiff']['delta_oob_loss'], 2)} / Δ MBL: {round(metrics['midiff'].get('delta_mbl_loss'), 2)}",
 				f"Δ OOB: {round(metrics['ours']['delta_oob_loss'], 2)} / Δ MBL: {round(metrics['ours'].get('delta_mbl_loss'), 2)}",
 				""  # Last column has no metrics
+			]
+		elif skip_scene_before:
+			# 4-column layout: ATISS, Mi-Diff, Ours, GT (no "Scene Before")
+			textbox_contents = [
+				f"OOB: {round(metrics['atiss']['total_oob_loss'], 2)} / MBL: {round(metrics['atiss'].get('total_mbl_loss'), 2)}",
+				f"OOB: {round(metrics['midiff']['total_oob_loss'], 2)} / MBL: {round(metrics['midiff'].get('total_mbl_loss'), 2)}",
+				f"OOB: {round(metrics['ours']['total_oob_loss'], 2)} / MBL: {round(metrics['ours'].get('total_mbl_loss'), 2)}",
+				"",  # GT column has no metrics
 			]
 		else:
 			# For "full" mode, use total metrics without delta symbol
@@ -627,29 +655,38 @@ def add_metrics_to_plot(axs, row_idx, metrics, mode="instr", is_supp=False, asse
 									  verticalalignment='bottom', 
 									  bbox=textbox)
 
-def set_column_titles(mode, axs, is_supp=False, asset_sampling=False, num_asset_samples=0):
+def set_column_titles(mode, axs, is_supp=False, asset_sampling=False, num_asset_samples=0, skip_scene_before=False):
 	title_font_size = 32
-	
+
 	# Handle asset sampling differently
 	if asset_sampling:
 		column_titles = ["Scene Before"]
-		
+
 		# Add sample titles
 		for i in range(num_asset_samples):
 			column_titles.append(f"Asset #{i+1}")
-		
+
 		# Add GT title if in instr mode
 		if mode == "instr":
 			column_titles.append("Scene After (GT)")
-	
+
+	elif skip_scene_before:
+		# 4-column layout: no "Scene Before"
+		column_titles = [
+			"ATISS",
+			"Mi-Diff",
+			"ReSpace (ours)",
+			"GT",
+		]
+
 	# Original implementation for method comparison
 	else:
 		column_titles = [
 			"Scene Before" if is_supp==False else "GT",
 			"ATISS",
 			"Mi-Diff",
-			"ReSpace (ours)" if mode == "instr" else ("ReSpace (ours)" if is_supp==False else "ReSpace (ours) (BON=1)"),
-			"Scene After (GT)" if mode == "instr" else ("GT" if is_supp==False else "ReSpace (ours) (BON=8)")
+			"ReSpace (ours)" if mode == "instr" else ("ReSpace" if is_supp==False else r'$\mathrm{ReSpace/A}^{\dagger}$'),
+			"Scene After (GT)" if mode == "instr" else ("GT" if is_supp==False else r'$\mathrm{ReSpace/A}^{\dagger}_{S8}$')
 		]
 	
 	# Set the titles
@@ -686,7 +723,7 @@ def plot_qualitative_figure_ours_vs_baselines_full():
 		"bedroom": 5.0,
 		"livingroom": 5.0,
 	}
-	plot_qualitative_figure_comparison("full", num_rows=2, sample_data=sample_data, camera_heights=camera_heights)
+	plot_qualitative_figure_comparison("full", num_rows=2, sample_data=sample_data, camera_heights=camera_heights, skip_scene_before=True)
 
 def plot_qualitative_figure_ours_vs_baselines_full_supp():
 	sample_data = {
@@ -879,7 +916,8 @@ def compute_pms_score(prompt, new_obj_desc):
 	score = correct_words / len(prompt_words)
 	return score
 
-blue_colors = ['#78a5cc', '#286bad', '#0D3A66', '#011733']
+# blue_colors = ['#78a5cc', '#286bad', '#0D3A66', '#011733']
+blue_colors = ['#78a5cc', "#3d79b4", "#29619A", "#13417D"]
 orange_colors = ['#FFC09F', '#FF9A6C', '#FF7F3F', '#FF5C00']  # From lighter to darker
 
 def count_words(text):
@@ -963,154 +1001,100 @@ def process_full_scenes_data(base_paths, seeds):
 
 def plot_pms_analysis():
 	seeds = ["1234", "3456", "5678"]
-	
-	# Process data for all room types
-	base_paths = [
-		"eval/samples/respace/full/bedroom-with-qwen1.5b-all-grpo-bon-1/json",
-		"eval/samples/respace/full/livingroom-with-qwen1.5b-all-grpo-bon-1/json"
-		"eval/samples/respace/full/all-with-qwen1.5b-all-grpo-bon-1/json"
-	]
-	
-	print("Processing all room data...")
-	df = process_full_scenes_data(base_paths, seeds)
-	
-	if len(df) > 0:
-		print(f"\nTotal data points: {len(df)}")
-		
-		# Configure font styles to match example
-		plt.rcParams['font.family'] = 'STIXGeneral'
-		plt.rcParams['mathtext.fontset'] = 'stix'  # For math symbols
-		plt.rcParams['font.size'] = 12  # Default size, will override where needed
-		plt.rcParams['text.usetex'] = False  # Using built-in math rendering
-		plt.rcParams['axes.unicode_minus'] = True  # Proper minus signs
-		
-		# Define font sizes
-		times_new_roman_size = 36
-		label_font_size = 28
-		tick_font_size = 28
-		
-		# Create bins for prompt word count and object count
-		word_bin_size = 1  # Each word gets its own bin
-		obj_bin_size = 1   # Each object count gets its own bin
-		
-		# Bin the data
-		df['word_count_bin'] = (df['prompt_word_count'] // word_bin_size) * word_bin_size
-		df['object_count_bin'] = (df['object_count'] // obj_bin_size) * obj_bin_size
-		
-		# Aggregate data for prompt word count
-		word_agg = df.groupby('word_count_bin')['pms_score'].agg(['mean', 'std', 'count']).reset_index()
-		
-		# Aggregate data for object count
-		obj_agg = df.groupby('object_count_bin')['pms_score'].agg(['mean', 'std', 'count']).reset_index()
-		
-		# Filter bins with too few samples for reliability
-		min_samples = 5  # Minimum number of samples per bin
-		word_agg = word_agg[word_agg['count'] >= min_samples]
-		obj_agg = obj_agg[obj_agg['count'] >= min_samples]
-		
-		# Sort the aggregated data by bin value
-		word_agg = word_agg.sort_values('word_count_bin')
-		obj_agg = obj_agg.sort_values('object_count_bin')
-		
-		# Create figure with two x-axes
-		fig, ax1 = plt.subplots(figsize=(10, 8))
-		
-		# Plot prompt word count vs PMS score
-		ax1.plot(
-			word_agg['word_count_bin'], 
-			word_agg['mean'], 
-			'o-',  
-			markersize=6, 
-			linewidth=2,  
-			color=blue_colors[0], 
-			label="Prompt Word Count"
-		)
-		ax1.fill_between(
-			word_agg['word_count_bin'], 
-			[m-s for m,s in zip(word_agg['mean'], word_agg['std'])],
-			[m+s for m,s in zip(word_agg['mean'], word_agg['std'])],
-			color=blue_colors[0], 
-			alpha=0.1
-		)
-		
-		# Create a twin x-axis for object count
-		ax2 = ax1.twiny()
-		
-		# Plot object count vs PMS score on the same y-axis
-		ax2.plot(
-			obj_agg['object_count_bin'], 
-			obj_agg['mean'], 
-			'o-',  
-			markersize=6, 
-			linewidth=2,  
-			color=blue_colors[2], 
-			label="Object Count"
-		)
-		ax1.fill_between(
-			obj_agg['object_count_bin'], 
-			[m-s for m,s in zip(obj_agg['mean'], obj_agg['std'])],
-			[m+s for m,s in zip(obj_agg['mean'], obj_agg['std'])],
-			color=blue_colors[2], 
-			alpha=0.1
-		)
-		
-		# Set up the axes labels with styled fonts
-		ax1.set_xlabel("Prompt Word Count", fontsize=label_font_size)
-		ax1.set_ylabel("PMS", fontsize=label_font_size)
-		ax2.set_xlabel("# of objects", fontsize=label_font_size)
-		
-		# Style tick parameters
-		ax1.tick_params(axis='both', labelsize=tick_font_size)
-		ax2.tick_params(axis='x', labelsize=tick_font_size)
-		
-		# Round y-axis ticks to 1 decimal place
-		ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.1f}'))
-		
-		# Set x-axis limits for both axes
-		word_min = min(word_agg['word_count_bin'])
-		word_max = max(word_agg['word_count_bin'])
-		obj_min = min(obj_agg['object_count_bin'])
-		obj_max = max(obj_agg['object_count_bin'])
-		
-		# Create appropriate bins for x-ticks to match style
-		word_ticks = list(range(int(word_min), int(word_max) + 1, 1))
-		obj_ticks = list(range(int(obj_min), int(obj_max) + 1, 2))
-		
-		# Set tick positions and labels
-		ax1.set_xticks(word_ticks)
-		ax2.set_xticks(obj_ticks)
-		
-		# Set x-axis limits
-		ax1.set_xlim(word_min - 0.5, word_max + 0.5)
-		ax2.set_xlim(obj_min - 0.5, obj_max + 0.5)
-		
-		# Add grid for better readability
-		ax1.grid(True, linestyle='--', alpha=0.5)
 
-		# set y axis max to 1.0
-		ax1.set_ylim(0.4, 1.05)
-		
-		# Combine legends from both axes using styled font
-		lines1, labels1 = ax1.get_legend_handles_labels()
-		lines2, labels2 = ax2.get_legend_handles_labels()
-		
-		legend = ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=26)
-		legend.get_frame().set_alpha(0.99)
-		
-		# Set title with styled font
-		plt.title("PMS Variability / Full — merged datasets", fontsize=times_new_roman_size)
-		
-		# Adjust layout to match example
-		plt.tight_layout()
-		plt.subplots_adjust(left=0.1, right=0.98, top=0.84, bottom=0.11)
-		
-		# Save as both JPG and SVG
-		# plt.savefig("./plots/pms_relationships_combined.jpg", dpi=300)
-		plt.savefig("./plots/pms_relationships_combined.svg")
-		
-		print("Plot saved as ./plots/pms_relationships_combined.jpg and .svg")
-	else:
+	# Process data for each room split separately
+	room_splits = {
+		"Bedroom": ["eval/samples/respace/full/bedroom-with-qwen1.5b-all-grpo-bon-1/json"],
+		"Livingroom": ["eval/samples/respace/full/livingroom-with-qwen1.5b-all-grpo-bon-1/json"],
+		"All": ["eval/samples/respace/full/all-with-qwen1.5b-all-grpo-bon-1/json"],
+	}
+
+	split_dfs = {}
+	for split_name, base_paths in room_splits.items():
+		print(f"Processing {split_name} data...")
+		df = process_full_scenes_data(base_paths, seeds)
+		if len(df) > 0:
+			split_dfs[split_name] = df
+			print(f"  {split_name}: {len(df)} data points")
+
+	if not split_dfs:
 		print("No valid data found for analysis")
+		return
+
+	# Configure font styles
+	plt.rcParams['font.family'] = 'STIXGeneral'
+	plt.rcParams['mathtext.fontset'] = 'stix'
+	plt.rcParams['font.size'] = 12
+	plt.rcParams['text.usetex'] = False
+	plt.rcParams['axes.unicode_minus'] = True
+
+	# Define font sizes
+	times_new_roman_size = 36
+	label_font_size = 28
+	tick_font_size = 28
+
+	min_samples = 5
+
+	# Create figure
+	fig, ax1 = plt.subplots(figsize=(10, 8))
+
+	# Plot each room split as a separate blue line
+	global_word_min = float('inf')
+	global_word_max = float('-inf')
+
+	for i, (split_name, df) in enumerate(split_dfs.items()):
+		color = blue_colors[i]
+
+		# Bin and aggregate
+		df['word_count_bin'] = df['prompt_word_count']
+		word_agg = df.groupby('word_count_bin')['pms_score'].agg(['mean', 'std', 'count']).reset_index()
+		word_agg = word_agg[word_agg['count'] >= min_samples]
+		word_agg = word_agg.sort_values('word_count_bin')
+
+		if len(word_agg) == 0:
+			continue
+
+		global_word_min = min(global_word_min, word_agg['word_count_bin'].min())
+		global_word_max = max(global_word_max, word_agg['word_count_bin'].max())
+
+		ax1.plot(
+			word_agg['word_count_bin'],
+			word_agg['mean'],
+			'o-',
+			markersize=6,
+			linewidth=2,
+			color=color,
+			label=split_name,
+		)
+		ax1.fill_between(
+			word_agg['word_count_bin'],
+			[m - s for m, s in zip(word_agg['mean'], word_agg['std'])],
+			[m + s for m, s in zip(word_agg['mean'], word_agg['std'])],
+			color=color,
+			alpha=0.05,
+		)
+
+	ax1.set_xlabel("Prompt Word Count", fontsize=label_font_size)
+	ax1.set_ylabel("PMS", fontsize=label_font_size)
+	ax1.tick_params(axis='both', labelsize=tick_font_size)
+	ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.1f}'))
+
+	word_ticks = list(range(int(global_word_min), int(global_word_max) + 1, 1))
+	ax1.set_xticks(word_ticks)
+	ax1.set_xlim(global_word_min, global_word_max - 1)
+	ax1.set_ylim(0.0, 1.0)
+	ax1.grid(True, linestyle='--', alpha=0.5)
+
+	legend = ax1.legend(loc='lower right', fontsize=26)
+	legend.get_frame().set_alpha(0.99)
+
+	plt.title("PMS Variability / Full", fontsize=times_new_roman_size)
+	plt.tight_layout()
+	plt.subplots_adjust(left=0.1, right=0.98, top=0.93, bottom=0.11)
+	plt.savefig("./plots/pms_relationships_all.svg")
+	plt.savefig("./plots/pms_relationships_all.pdf")
+
+	print("Plot saved as ./plots/pms_relationships_all.svg and .pdf")
 
 def plot_bon_full():
 # Configure font styles
@@ -1195,7 +1179,7 @@ def plot_bon_full():
 	ax.set_ylabel("Layout Violations (OOB / MBL) × 10³", fontsize=label_font_size)
 	
 	# Set title
-	ax.set_title("BoN Scaling / Full — 'all' dataset", fontsize=times_new_roman_size)
+	ax.set_title("BoN Scaling / Full — 'all' split", fontsize=times_new_roman_size)
 	
 	# Set x-axis to log scale to better show BoN scaling
 	ax.set_xscale('log', base=2)
@@ -1429,10 +1413,736 @@ def plot_assets_360_video():
 
 	create_360_videos_assets(scene_example, camera_height, pth_folder_fig)
 
+def plot_histogram_corner_count_for_roomtype():
+	
+	# room_types = ["bedroom", "livingroom", "office", "all"]
+	room_types = ["bedroom"]
+	for room_type in room_types:
+		print(f"Processing room type: {room_type}")
+		create_histogram_corner_count_for_roomtype(
+			room_type=room_type,
+			filename=f"histogram_corner_count_{room_type}",
+			pth_output="./plots"
+		)
+	
+	print("All histograms completed!")	
+
+def create_histogram_corner_count_for_roomtype(room_type, filename, pth_output):
+	
+	# iterate over all rooms for the given split and count corners
+	counts = []
+	
+	# combine train/val/test splits
+	for split in ["train", "val", "test"]:
+		all_pths = get_pths_dataset_split(room_type, split)
+		for pth_json in tqdm(all_pths):
+			scene = json.load(open(os.getenv("PTH_STAGE_2_DEDUP") + f"/{pth_json}", "r"))
+			bounds_top = scene["bounds_top"]
+			num_corners = len(bounds_top)
+			counts.append(num_corners)
+	
+	# Plot histogram
+	plt.figure(figsize=(8, 6))
+	plt.hist(counts, bins=range(min(counts)-1, max(counts) + 2), align='left', color='skyblue', edgecolor='black')
+	plt.title(f'Histogram of Corner Counts for {room_type.capitalize()}')
+	plt.xlabel('Number of Corners')
+	plt.ylabel('Frequency')
+	plt.xticks(range(min(counts), max(counts) + 1))
+	plt.grid(axis='y', alpha=0.75)
+	
+	# Save figure
+	pth_fig = pth_output + f"/{filename}.png"
+	plt.savefig(pth_fig)
+	plt.close()
+	print(f"Saved histogram to {pth_fig}")
+def render_gt_test_all(room_types=None, pth_output_base="./eval/viz/gt-renders", camera_height=5.0):
+	if room_types is None:
+		room_types = ["bedroom", "livingroom", "all"]
+	
+	bg_color = np.array([240, 240, 240]) / 255.0  # Match your existing renders
+	
+	for room_type in room_types:
+		print(f"Processing GT scenes for room type: {room_type}")
+		
+		# Create output directory for this room type
+		pth_output = Path(pth_output_base) / room_type / "diag"
+		pth_output.mkdir(parents=True, exist_ok=True)
+		
+		# Get all test scene paths
+		all_pths = get_pths_dataset_split(room_type, "test")
+		
+		print(f"Found {len(all_pths)} test scenes for {room_type}")
+		
+		# Process each scene
+		for idx, pth_scene in enumerate(tqdm(all_pths, desc=f"Rendering {room_type} GT scenes")):
+			try:
+				# Load the GT scene
+				scene_path = os.path.join(os.getenv("PTH_STAGE_2_DEDUP"), pth_scene)
+				scene = json.load(open(scene_path, "r"))
+				
+				# Create filename: gt_{room_type}_{idx}.jpg
+				filename = f"{idx}"
+
+				# render_full_scene_and_export_with_gif(scene, idx, pth_output=pth_viz_output, create_gif=args.create_gifs)
+				
+				# Render the scene
+				render_full_scene_and_export_with_gif(scene, filename=filename, pth_output=pth_output.parent, create_gif=False) #, bg_color=bg_color, camera_height=camera_height)
+				
+			except Exception as e:
+				print(f"Error processing scene {idx} ({pth_scene}): {str(e)}")
+				continue
+		
+		print(f"Completed rendering {len(all_pths)} GT scenes for {room_type}")
+
+def aggregate_removal_data_across_seeds(all_analysis_data):
+	"""
+	Aggregate removal analysis data across seeds to compute mean and std.
+	
+	Args:
+		all_analysis_data: List of lists, where each sublist contains data for one seed
+	
+	Returns:
+		Dictionary with aggregated metrics for each plot type
+	"""
+	# Flatten all data across seeds
+	all_data_flat = []
+	for seed_data in all_analysis_data:
+		all_data_flat.extend(seed_data)
+	
+	# Group by prompt_length for plot 2
+	prompt_length_groups = defaultdict(list)
+	for item in all_data_flat:
+		prompt_length_groups[item['prompt_length']].append(item['is_success'])
+	
+	prompt_length_stats = {}
+	for length, successes in prompt_length_groups.items():
+		prompt_length_stats[length] = {
+			'mean': np.mean(successes) * 100,
+			'std': np.std(successes) * 100,
+			'count': len(successes)
+		}
+	
+	# Group by scene_length bins for plot 1
+	scene_lengths = [item['scene_length'] for item in all_data_flat]
+	min_scene_len, max_scene_len = min(scene_lengths), max(scene_lengths)
+	n_bins = 10
+	bin_size = (max_scene_len - min_scene_len) / n_bins
+	
+	scene_length_groups = defaultdict(list)
+	for item in all_data_flat:
+		bin_idx = int((item['scene_length'] - min_scene_len) / bin_size)
+		bin_idx = min(bin_idx, n_bins - 1)  # Ensure last bin captures max value
+		bin_center = min_scene_len + (bin_idx + 0.5) * bin_size
+		scene_length_groups[bin_center].append(item['is_success'])
+	scene_length_groups.pop(max(scene_length_groups.keys()))
+	
+	scene_length_stats = {}
+	for bin_center, successes in scene_length_groups.items():
+		scene_length_stats[bin_center] = {
+			'mean': np.mean(successes) * 100,
+			'std': np.std(successes) * 100,
+			'count': len(successes)
+		}
+	
+	# Group by confusion_type for plot 3 (filter out None values)
+	# Track both success stats and failure counts
+	confusion_groups = defaultdict(list)
+	for item in all_data_flat:
+		if item['confusion_type'] is not None:
+			confusion_groups[item['confusion_type']].append(item['is_success'])
+	
+	confusion_stats = {}
+	for conf_type, successes in confusion_groups.items():
+		failure_count = sum(1 for s in successes if not s)  # Count failures
+		confusion_stats[conf_type] = {
+			'mean': np.mean(successes) * 100,
+			'std': np.std(successes) * 100,
+			'count': len(successes),
+			'failure_count': failure_count  # Add failure count
+		}
+	
+	return {
+		'prompt_length': prompt_length_stats,
+		'scene_length': scene_length_stats,
+		'confusion_type': confusion_stats
+	}
+
+
+def plot_removal_analysis(room_type, json_path):
+	"""
+	Create a 1x3 plot showing removal analysis results.
+	
+	Args:
+		room_type: The room type being analyzed (e.g., "bedroom", "livingroom", "all")
+		json_path: Path to the JSON file with removal analysis data
+	"""
+	# Load the data
+	with open(json_path, 'r') as f:
+		all_analysis_data = json.load(f)
+	
+	# Aggregate data across seeds
+	stats = aggregate_removal_data_across_seeds(all_analysis_data)
+	
+	# Configure font styles to match existing plots
+	plt.rcParams['font.family'] = 'STIXGeneral'
+	plt.rcParams['mathtext.fontset'] = 'stix'
+	plt.rcParams['font.size'] = 12
+	plt.rcParams['text.usetex'] = False
+	plt.rcParams['axes.unicode_minus'] = True
+	
+	# Define font sizes
+	times_new_roman_size = 36
+	label_font_size = 28
+	tick_font_size = 28
+	
+	# Blue color scheme matching existing plots
+	blue_colors = ['#78a5cc', '#286bad', '#0D3A66', '#011733']
+	
+	# Create figure with 1x3 subplots
+	fig, axes = plt.subplots(1, 3, figsize=(24, 6))
+	
+	# ============== PLOT 1: Scene Length vs Success Rate ==============
+	ax1 = axes[0]
+	scene_data = stats['scene_length']
+	scene_bins = sorted(scene_data.keys())
+	scene_means = [scene_data[bin]['mean'] for bin in scene_bins]
+	scene_stds = [scene_data[bin]['std'] for bin in scene_bins]
+	
+	# Plot with dots and error bars
+	ax1.plot(scene_bins, scene_means, 'o-', 
+			 markersize=8, linewidth=2.5, 
+			 color=blue_colors[2], label="Success Rate")
+	
+	# Add shaded area for standard deviation
+	ax1.fill_between(
+		scene_bins,
+		[m-s for m,s in zip(scene_means, scene_stds)],
+		[m+s for m,s in zip(scene_means, scene_stds)],
+		color=blue_colors[2],
+		alpha=0.1
+	)
+	
+	ax1.set_xlabel("Scene Length (words)", fontsize=label_font_size)
+	ax1.set_ylabel("Success Rate (%)", fontsize=label_font_size)
+	ax1.set_title("Success Rate vs Scene Length", fontsize=times_new_roman_size, pad=16)
+	ax1.tick_params(axis='both', labelsize=tick_font_size)
+	ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.0f}'))
+	ax1.grid(True, linestyle='--', alpha=0.3)
+	ax1.set_ylim(0, 105)
+	
+	# ============== PLOT 2: Prompt Length vs Success Rate ==============
+	ax2 = axes[1]
+	prompt_data = stats['prompt_length']
+	prompt_lengths = sorted(prompt_data.keys())
+	prompt_means = [prompt_data[length]['mean'] for length in prompt_lengths]
+	prompt_stds = [prompt_data[length]['std'] for length in prompt_lengths]
+	
+	# Plot with dots and error bars
+	ax2.plot(prompt_lengths, prompt_means, 'o-', 
+			 markersize=8, linewidth=2.5, 
+			 color=blue_colors[2], label="Success Rate")
+	
+	# Add shaded area for standard deviation
+	ax2.fill_between(
+		prompt_lengths,
+		[m-s for m,s in zip(prompt_means, prompt_stds)],
+		[m+s for m,s in zip(prompt_means, prompt_stds)],
+		color=blue_colors[2],
+		alpha=0.1
+	)
+	
+	ax2.set_xlabel("Prompt Length (words)", fontsize=label_font_size)
+	ax2.set_ylabel("Success Rate (%)", fontsize=label_font_size)
+	ax2.set_title("Success Rate vs Prompt Length", fontsize=times_new_roman_size, pad=16)
+	ax2.tick_params(axis='both', labelsize=tick_font_size)
+	ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.0f}'))
+	ax2.grid(True, linestyle='--', alpha=0.3)
+	ax2.set_ylim(0, 105)
+	
+	# ============== PLOT 3: Confusion Type Distribution ==============
+	ax3 = axes[2]
+	confusion_data = stats['confusion_type']
+	
+	# Define order and labels for confusion types
+	confusion_order = ['only_same', 'only_different', 'mixed']
+	confusion_labels = ['Same Class', 'Different Class', 'Mixed']
+	
+	# Filter to only include types that exist in the data
+	existing_types = [ct for ct in confusion_order if ct in confusion_data]
+	existing_labels = [confusion_labels[confusion_order.index(ct)] for ct in existing_types]
+	
+	failure_counts = [confusion_data[ct]['failure_count'] for ct in existing_types]
+	
+	# Create bar positions
+	x_pos = np.arange(len(existing_types))
+	
+	# Plot bars without error bars
+	bars = ax3.bar(x_pos, failure_counts, 
+				   color=blue_colors[2], alpha=0.7, width=0.6)
+	
+	ax3.set_xlabel("Failure Type", fontsize=label_font_size)
+	ax3.set_ylabel("Number of Failures", fontsize=label_font_size)
+	ax3.set_title("Failure Count by Confusion Type", fontsize=times_new_roman_size, pad=16)
+	ax3.set_xticks(x_pos)
+	ax3.set_xticklabels(existing_labels, fontsize=tick_font_size, rotation=0)
+	ax3.tick_params(axis='y', labelsize=tick_font_size)
+	ax3.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{int(x)}'))
+	ax3.grid(True, linestyle='--', alpha=0.3, axis='y')
+
+	print(failure_counts)
+	
+	# Set ylim based on data (add some headroom)
+	max_count = max(failure_counts) if failure_counts else 1
+	ax3.set_ylim(0, max_count * 1.1)
+	
+	# Adjust layout
+	plt.tight_layout()
+	plt.subplots_adjust(left=0.05, right=0.98, top=0.89, bottom=0.15, wspace=0.25)
+	
+	# Save plot
+	output_path = f"./plots/removal_analysis_{room_type}.pdf"
+	plt.savefig(output_path, dpi=300)
+	print(f"Saved removal analysis plot to {output_path}")
+	
+	# Also save as SVG
+	output_path_svg = f"./plots/removal_analysis_{room_type}.svg"
+	plt.savefig(output_path_svg)
+	print(f"Saved removal analysis plot to {output_path_svg}")
+	
+	plt.close()
+
+def get_image_path(folder: str, seed: int, idx: int) -> Path:
+	base = Path("/home/martinbucher/git/stan-24-sgllm/eval/samples/respace/full")
+	return base / folder / "viz" / str(seed) / "diag" / f"{idx}.jpg"
+
+
+def crop_image(img: Image.Image) -> Image.Image:
+	w, h = img.size
+	return img.crop((0, int(h * 0.15), w, int(h * 0.85)))
+
+
+def plot_qualitative_figure_ours_sft_old_new_dpo_rej(MODELS, HARDCODED_INDICES=None):
+	seed = 1234
+	num_rows = 5
+	rand_seed = 44
+
+	# --- Choose indices ---
+	if HARDCODED_INDICES is not None:
+		chosen_indices = HARDCODED_INDICES[:num_rows]
+	else:
+		rng = random.Random(rand_seed)
+		chosen_indices = sorted(rng.sample(range(500), num_rows))
+	print(f"Scene indices: {chosen_indices}")
+
+	# --- Style ---
+	plt.rcParams["font.family"] = "STIXGeneral"
+	plt.rcParams["mathtext.fontset"] = "stix"
+	plt.rcParams["font.size"] = 12
+	plt.rcParams["text.usetex"] = False
+	plt.rcParams["axes.unicode_minus"] = True
+
+	title_font_size = 28
+
+	num_cols = len(MODELS)
+	fig, axs = plt.subplots(num_rows, num_cols, figsize=(4.2 * num_cols, 3.4 * num_rows))
+
+	# --- Fill grid ---
+	for row_idx, scene_idx in enumerate(chosen_indices):
+		for col_idx, model_cfg in enumerate(MODELS):
+			ax = axs[row_idx, col_idx]
+			img_path = get_image_path(model_cfg["folder"], seed, scene_idx)
+
+			if img_path.exists():
+				img = crop_image(Image.open(img_path))
+				ax.imshow(img)
+			else:
+				ax.set_facecolor("#d0d0d0")
+				ax.text(0.5, 0.5, f"missing\n{img_path.name}",
+						transform=ax.transAxes, ha="center", va="center",
+						fontsize=9, color="#555")
+
+			ax.axis("off")
+
+			if col_idx == 0:
+				ax.annotate(f"Scene #{scene_idx}", xy=(0, 0.5), xycoords="axes fraction",
+							xytext=(-6, 0), textcoords="offset points",
+							ha="right", va="center", fontsize=18, rotation=90)
+
+	# --- Column titles ---
+	for col_idx, model_cfg in enumerate(MODELS):
+		axs[0, col_idx].set_title(model_cfg["label"], fontsize=title_font_size, pad=12)
+
+	plt.tight_layout()
+	plt.subplots_adjust(left=0.06, right=0.99, top=0.96, bottom=0.01, hspace=0.04, wspace=0.02)
+
+	# os.makedirs("./plots", exist_ok=True)
+	plt.savefig("./plots/ours_sft_old_new_dpo_rej.svg", bbox_inches="tight")
+	#plt.savefig("./plots/ours_sft_old_new_dpo_rej.pdf", bbox_inches="tight")
+	#plt.savefig("./plots/ours_sft_old_new_dpo_rej.jpg", dpi=200, bbox_inches="tight")
+	print("Saved to ./plots/ours_sft_old_new_dpo_rej.{svg,pdf,jpg}")
+	plt.close(fig)
+
+def plot_seq_accuracy_vs_instr_length(room_type: str, bon_values: list = [1, 8], include_rot: bool = False):
+	"""
+	Plot Sequence Accuracy vs Instruction Length for one or more BoN settings.
+
+	Reads:  ./plots/seq_eval_raw_{room_type}_bon_{bon}.json
+			(+ ./plots/seq_eval_raw_{room_type}_bon_{bon}_rot.json if include_rot)
+	Saves:  ./plots/seq_accuracy_vs_instr_length_{room_type}.pdf
+
+	JSON structure (from print_seq_eval_results):
+		List[           # seeds
+			List[       # samples
+				{"acc_seq": float, "seq_length": int, ...}
+			]
+		]
+	"""
+	plt.rcParams['font.family']        = 'STIXGeneral'
+	plt.rcParams['mathtext.fontset']   = 'stix'
+	plt.rcParams['font.size']          = 12
+	plt.rcParams['text.usetex']        = False
+	plt.rcParams['axes.unicode_minus'] = True
+
+	times_new_roman_size = 36
+	label_font_size      = 32
+	tick_font_size       = 32
+	legend_font_size     = 30
+
+	# ── Build list of configs to plot ─────────────────────────────────────────
+	# Each config: (label, json_path, color, linestyle)
+	configs = []
+	color_idx = 0
+	for bon in sorted(bon_values):
+		pth = f"./plots/seq_eval_raw_{room_type}_bon_{bon}.json"
+		configs.append((f"BoN={bon}", pth, blue_colors[color_idx % len(blue_colors)], '-'))
+		color_idx += 1
+		if include_rot:
+			pth_rot = f"./plots/seq_eval_raw_{room_type}_bon_{bon}_rot.json"
+			configs.append((f"BoN={bon} + ROT", pth_rot, blue_colors[color_idx % len(blue_colors)], '--'))
+			color_idx += 1
+
+	# ── Load & aggregate per seq_length ───────────────────────────────────────
+	series = {}  # label -> {seq_length: [acc_seq values]}
+
+	for label, pth, _, _ in configs:
+		if not os.path.exists(pth):
+			print(f"  Skipping {label}: {pth} not found")
+			continue
+		with open(pth, "r") as f:
+			all_seq_metrics = json.load(f)
+
+		length_to_seed_means = defaultdict(list)
+		for seed_metrics in all_seq_metrics:
+			length_to_accs_this_seed = defaultdict(list)
+			for m in seed_metrics:
+				if m.get("acc_seq") is not None:
+					length_to_accs_this_seed[m["seq_length"]].append(m["acc_seq"])
+			for length, accs in length_to_accs_this_seed.items():
+				length_to_seed_means[length].append(np.mean(accs))
+
+		series[label] = length_to_seed_means
+
+	# ── Figure ────────────────────────────────────────────────────────────────
+	fig, ax = plt.subplots(figsize=(10, 8))
+
+	all_lengths = sorted(set(l for label in series for l in series[label]))
+
+	for label, _, color, linestyle in configs:
+		if label not in series:
+			continue
+		lengths = sorted(series[label].keys())
+		means   = [np.mean(series[label][l]) for l in lengths]
+		stds    = [np.std(series[label][l])  for l in lengths]
+
+		ax.plot(lengths, means, 'o' + linestyle,
+				markersize=6, linewidth=2,
+				color=color, label=label)
+		ax.fill_between(lengths,
+						[m - s for m, s in zip(means, stds)],
+						[m + s for m, s in zip(means, stds)],
+						color=color, alpha=0.1)
+		
+	# set horizontal dashed line for GT accuracy (hardcoded)
+	# ax.axhline(0.95, color=blue_colors[0], linestyle='--', linewidth=1.5, label="GT (Upper Bound)")
+
+	# ── Print GT accuracy per seq_length (recomputing acc_seq on the fly) ────
+	pth_gt = f"./plots/seq_eval_raw_{room_type}_gt.json"
+	if os.path.exists(pth_gt):
+		with open(pth_gt, "r") as f:
+			gt_metrics = json.load(f)
+
+		# Per seed, compute mean acc per length bin
+		gt_length_to_seed_means = defaultdict(list)
+		for seed_metrics in gt_metrics:
+			length_to_accs = defaultdict(list)
+			for m in seed_metrics:
+				if m.get("seq_length", 0) > 0:
+					acc = (m["n_add_passed"] + m["n_remove_total"]) / m["seq_length"]
+					length_to_accs[m["seq_length"]].append(acc)
+			for length, accs in length_to_accs.items():
+				gt_length_to_seed_means[length].append(np.mean(accs))
+
+		print("GT upper bound (per seq_length):")
+		gt_lengths = sorted(gt_length_to_seed_means)
+		gt_means, gt_stds = [], []
+		for L in gt_lengths:
+			seed_means = gt_length_to_seed_means[L]
+			m, s = np.mean(seed_means), np.std(seed_means)
+			gt_means.append(m)
+			gt_stds.append(s)
+			print(f"  L={L:2d} | mean={m:.3f} ± {s:.3f}")
+
+		# Plot as a dashed gray line with shaded std
+		ax.plot(gt_lengths, gt_means, '--', color='gray', linewidth=2, label="Ground Truth")
+		ax.fill_between(gt_lengths,
+						[m - s for m, s in zip(gt_means, gt_stds)],
+						[m + s for m, s in zip(gt_means, gt_stds)],
+						color='gray', alpha=0.1)
+	else:
+		print(f"GT json not found at {pth_gt}")
+
+	# ── Labels & title ────────────────────────────────────────────────────────
+	room_label = room_type.split('-')[0]
+	ax.set_title(f"Seq. Accuracy — '{room_label}' dataset",
+				 fontsize=times_new_roman_size)
+	ax.set_xlabel("Instruction Length", fontsize=label_font_size)
+	ax.set_ylabel("Sequence Accuracy",  fontsize=label_font_size)
+
+	# ── Ticks ─────────────────────────────────────────────────────────────────
+	ax.tick_params(axis='both', labelsize=tick_font_size)
+	ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.2f}'))
+	ax.set_xticks(all_lengths)
+	ax.set_xticklabels([str(l) for l in all_lengths], fontsize=tick_font_size)
+	ax.set_xlim(left=all_lengths[0], right=all_lengths[-1])
+	ax.set_ylim(bottom=0.0, top=1.05)
+
+	# ── Legend ────────────────────────────────────────────────────────────────
+	try:
+		legend_font = fm.FontProperties(
+			fname='/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf')
+		legend_font.set_size(legend_font_size)
+		legend = ax.legend(loc='lower right', prop=legend_font)
+	except Exception:
+		legend = ax.legend(loc='lower right', fontsize=legend_font_size)
+	legend.get_frame().set_alpha(0.99)
+
+	# ── Grid & layout ─────────────────────────────────────────────────────────
+	ax.grid(True, linestyle='--', alpha=0.3)
+	plt.tight_layout()
+	plt.subplots_adjust(left=0.14, right=0.97, top=0.93, bottom=0.12)
+
+	suffix = f"_{room_type}_rot" if include_rot else f"_{room_type}"
+	plt.savefig(f"./plots/seq_accuracy_vs_instr_length{suffix}.svg")
+	plt.savefig(f"./plots/seq_accuracy_vs_instr_length{suffix}.pdf")
+	plt.close()
+	print(f"Saved to ./plots/seq_accuracy_vs_instr_length{suffix}.{{svg,pdf}}")
+
+def plot_ttc_scaling():
+    """
+    Test-time compute scaling plot for full scene synthesis (bedroom split).
+    X-axis: per-scene runtime in seconds (linear).
+    Primary Y-axis (left, blue):  Total VBL × 10³ (lower is better).
+    Secondary Y-axis (right, black): PMS (higher is better).
+    Win-rate annotated as a badge where available.
+    """
+
+    # ── Hardcoded data ────────────────────────────────────────────────────────
+    # (label, runtime_s, vbl_mean, vbl_std, pms_mean, winrate_or_None)
+    # Runtime from LaTeX table comments (mean scene gen time, seed 5678).
+    # VBL and PMS from the bedroom ablation table.
+    TTC_CONFIGS = [
+        # label                 rt(s)   	VBL   		   PMS    WR%
+        ("$B_1$", 				6.11,		134.8,	5.3,  0.69,  None),
+        
+		("$B_8$", 				9.88,		68.5,   2.8,  0.80,  None),
+        
+		("$B_1{+}R$", 			9.16,		68.9,   1.3,  0.79,  None),
+        
+		("$B_8{+}R$", 			16.75,		39.0,   4.7,  0.83,  None),
+
+        ("$B_1{+}S_8$", 		15.90, 		27.4,   0.5,  0.80,  70.0),
+        
+		("$B_8{+}S_8$", 		32.46,		15.1,   2.0,  0.90,  None),
+        
+		("$B_1{+}R{+}S_8$", 	16.12,		14.6,   1.7,  0.90,  None),
+        
+		("$B_8{+}R{+}S_8$",		139.29,		8.8,   	2.9,  0.94,  None),
+    ]
+
+    # ── Font / style ──────────────────────────────────────────────────────────
+    plt.rcParams['font.family']        = 'STIXGeneral'
+    plt.rcParams['mathtext.fontset']   = 'stix'
+    plt.rcParams['font.size']          = 12
+    plt.rcParams['text.usetex']        = False
+    plt.rcParams['axes.unicode_minus'] = True
+
+    times_new_roman_size = 36
+    label_font_size      = 28
+    tick_font_size       = 28
+    legend_font_size     = 22
+    annot_font_size      = 26
+
+    # ── Unpack ────────────────────────────────────────────────────────────────
+    labels   = [c[0] for c in TTC_CONFIGS]
+    runtimes = np.array([c[1] for c in TTC_CONFIGS])
+    vbl_mean = np.array([c[2] for c in TTC_CONFIGS])
+    vbl_std  = np.array([c[3] for c in TTC_CONFIGS])
+    pms_mean = np.array([c[4] for c in TTC_CONFIGS])
+    winrates = [c[5] for c in TTC_CONFIGS]
+
+    # ── Figure with twin y-axis ───────────────────────────────────────────────
+    fig, ax1 = plt.subplots(figsize=(10, 8))
+    ax2 = ax1.twinx()
+
+    x_lo = runtimes.min() * 0.75
+    x_hi = runtimes.max() * 1.4          # extra right margin for labels
+
+    # ── Faint connecting lines (sorted by runtime) ────────────────────────────
+    order = np.argsort(runtimes)
+    ax1.plot(runtimes[order], vbl_mean[order],
+             '-', linewidth=2.5, color=blue_colors[1], alpha=0.65, zorder=3)
+    ax2.plot(runtimes[order], pms_mean[order],
+             '-', linewidth=2.5, color=orange_colors[2], alpha=0.65, zorder=3)
+
+    # ── VBL markers + error bars (ax1, blue) ─────────────────────────────────
+    marker_styles = ['o', 's', '^', 'D', 'v', 'P', '*', 'X']
+    for i in range(len(TTC_CONFIGS)):
+        ax1.errorbar(
+            runtimes[i], vbl_mean[i],
+            yerr=vbl_std[i],
+            fmt=marker_styles[i % len(marker_styles)],
+            markersize=11,
+            color=blue_colors[2],
+            ecolor=blue_colors[1],
+            elinewidth=1.5,
+            capsize=4,
+            zorder=5,
+        )
+
+    # ── PMS markers (ax2, orange) ─────────────────────────────────────────────
+    for i in range(len(TTC_CONFIGS)):
+        ax2.scatter(runtimes[i], pms_mean[i],
+                    marker=marker_styles[i % len(marker_styles)],
+                    s=90, color=orange_colors[3], zorder=4)
+
+    # ── Method name labels (alternating above / below) ────────────────────────
+    label_dy = [16, -12, 8, 10, -8, 8, -8, 8]
+    for i, (lbl, xp, ym) in enumerate(zip(labels, runtimes, vbl_mean)):
+        dy = label_dy[i]
+        va = 'bottom' if dy > 0 else 'top'
+        ax1.annotate(
+            lbl,
+            xy=(xp, ym),
+            xytext=(0, dy),
+            textcoords="offset points",
+            fontsize=annot_font_size,
+            ha='center', va=va,
+            color='black',
+            zorder=7,
+        )
+
+    # # ── Win-rate badges ───────────────────────────────────────────────────────
+    # for i, (xp, ym, wr) in enumerate(zip(runtimes, vbl_mean, winrates)):
+    #     if wr is None:
+    #         continue
+    #     ax1.annotate(
+    #         f"WR: {wr:.0f}\\%",
+    #         xy=(xp, ym),
+    #         xytext=(34, 0),
+    #         textcoords="offset points",
+    #         fontsize=annot_font_size,
+    #         color='black',
+    #         fontweight='bold',
+    #         va='center',
+    #         bbox=dict(boxstyle="round,pad=0.3", facecolor='white',
+    #                   edgecolor='#888888', alpha=0.92),
+    #         arrowprops=dict(arrowstyle="-", color='#888888', lw=1.0),
+    #         zorder=8,
+    #     )
+
+    # ── X-axis (log scale, sparse clean ticks) ────────────────────────────────
+    # One tick per data point causes overlap in the 6/8/9 and 16/24 clusters.
+    # Instead show a small set of round reference values that don't collide.
+    ax1.set_xscale('log')
+    ax1.xaxis.set_minor_locator(plt.NullLocator())
+    sparse_ticks = [6, 10, 25, 140]
+    ax1.set_xticks(sparse_ticks)
+    ax1.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0f}s"))
+    ax1.tick_params(axis='x', which='major', labelsize=tick_font_size - 2)
+    ax1.set_xlim(x_lo, x_hi)
+
+    # ── Y-axis limits based on our data only ──────────────────────────────────
+    vbl_lo = max(0, (vbl_mean - vbl_std).min() * 0.85)
+    vbl_hi = (vbl_mean + vbl_std).max() * 1.1
+    ax1.set_ylim(0, vbl_hi)
+    ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.0f}'))
+    ax1.tick_params(axis='both', labelsize=tick_font_size, labelcolor='black')
+    ax1.yaxis.label.set_color('black')
+    ax1.spines['left'].set_color('black')
+
+    pms_lo = pms_mean.min()
+    pms_hi = min(1.0, pms_mean.max() * 1.04)
+    ax2.set_ylim(0, pms_hi)
+    ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.2f}'))
+    ax2.tick_params(axis='y', labelcolor='black', labelsize=tick_font_size)
+    ax2.yaxis.label.set_color('black')
+    ax2.spines['right'].set_color('black')
+
+    # ── Legend ────────────────────────────────────────────────────────────────
+    from matplotlib.lines import Line2D
+    legend_handles = [
+        Line2D([0], [0], marker='o', color='w',
+               markerfacecolor=blue_colors[2], markersize=10,
+               label="VBL $\\times 10^3$ $\\downarrow$"),
+        Line2D([0], [0], marker='o', color='w',
+               markerfacecolor=orange_colors[3], markersize=10,
+               label="PMS $\\uparrow$"),
+    ]
+    try:
+        legend_font = fm.FontProperties(
+            fname='/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf')
+        legend_font.set_size(legend_font_size)
+        legend = ax1.legend(handles=legend_handles, loc='upper right', prop=legend_font, bbox_to_anchor=(1.0, 0.92))
+    except Exception:
+        legend = ax1.legend(handles=legend_handles, loc='upper right',
+                            fontsize=legend_font_size)
+    legend.get_frame().set_alpha(0.99)
+
+    # ── Labels / title ────────────────────────────────────────────────────────
+    ax1.set_title("Test-Time Compute Scaling / Full",
+                  fontsize=times_new_roman_size)
+    ax1.set_xlabel("Runtime Per Scene (log scale, seconds)", fontsize=label_font_size)
+    ax1.set_ylabel("Total VBL $\\times 10^3$ $\\downarrow$", fontsize=label_font_size)
+    ax2.set_ylabel("PMS $\\uparrow$", fontsize=label_font_size)
+
+    ax1.grid(True, linestyle='--', alpha=0.3)
+
+    plt.tight_layout()
+    plt.subplots_adjust(left=0.12, right=0.87, top=0.93, bottom=0.11)
+
+    plt.savefig("./plots/ttc_scaling.svg")
+    plt.savefig("./plots/ttc_scaling.pdf")
+    print("Saved ./plots/ttc_scaling.{svg,pdf}")
+    plt.close()
+
 if __name__ == '__main__':
 	
 	# load_dotenv(".env.local")
 	load_dotenv(".env.stanley")
+
+	# MODELS = [
+	# 	{"label": "SFT$_{\\mathrm{old}}$",  "folder": "all-with-qwen1.5b-all-bon-1"},
+	# 	{"label": "GRPO$_{\\mathrm{old}}$", "folder": "all-with-qwen1.5b-all-grpo-bon-1"},
+	# 	{"label": "SFT$_{\\mathrm{new}}$",  "folder": "all-sft-feb20-bon-1"},
+	# 	{"label": "DPO (2e-5)",             "folder": "all-dpo-2e5-neq-bon-1"},
+	# 	{"label": "Rej. Sampling",          "folder": "all-rejn500-feb18-bon-1"},
+	# ]
+	# plot_qualitative_figure_ours_sft_old_new_dpo_rej(MODELS)
+
+	# plot_seq_accuracy_vs_instr_length(room_type="all", bon_values=[1, 8], include_rot=True)
+	# plot_seq_accuracy_vs_instr_length(room_type="all", bon_values=[1])
+
+	# plot_histogram_corner_count_for_roomtype()
 		
 	# bon_values = [ 1, 2, 4, 8, 16 ]
 	# fid_scores = [39.917, 39.823, 39.893, 40.017, 39.700 ]
@@ -1453,7 +2163,7 @@ if __name__ == '__main__':
 	# plot_stats_per_n_objects_instr("all", "all_qwen1.5B", n_aggregate_per=4)
 	# plot_stats_per_n_objects_instr("bedroom", "bedroom-with-qwen1.5b-all-grpo-bon-1_qwen1.5b-all-grpo-bon-1", n_aggregate_per=2)
 	# plot_stats_per_n_objects_instr("livingroom", "livingroom-with-qwen1.5b-all-grpo-bon-1_qwen1.5b-all-grpo-bon-1", n_aggregate_per=4)
-	plot_stats_per_n_objects_instr("all", "all-with-qwen1.5b-all-grpo-bon-1_qwen1.5b-all-grpo-bon-1", n_aggregate_per=4)
+	# plot_stats_per_n_objects_instr("all", "all-with-qwen1.5b-all-grpo-bon-1_qwen1.5b-all-grpo-bon-1", n_aggregate_per=4)
 	# plot_stats_per_n_objects_instr("all", "all-with-qwen1.5b-all-grpo-bon-1_qwen1.5b-all-grpo-bon-1", n_aggregate_per=4)
 
 	# plot_qualitative_figure_ours_vs_baselines_instr()
@@ -1463,6 +2173,8 @@ if __name__ == '__main__':
 	# plot_qualitative_figure_ours_vs_baseline_instr_assets()
 
 	# plot_pms_analysis()
+
+	plot_ttc_scaling()
 
 	# render_instr_sample()
 
@@ -1480,3 +2192,9 @@ if __name__ == '__main__':
 	# plot_assets_360_video()
 
 	# plot_voxelization_360_video()
+
+	# render_gt_test_all(["all"])
+
+	# plot_removal_analysis("livingroom", "./plots/removal_analysis_data_livingroom_test.json")
+	
+	# test_coordinate_system()

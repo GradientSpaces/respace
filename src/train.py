@@ -12,7 +12,7 @@ import time
 import pdb
 
 from utils import remove_and_recreate_folder, get_model, safe_parse_scene
-from test import run_test
+from test import run_test, run_test_fast
 
 def get_lora_sft_layers(model, process_index):
 	model_modules = str(model.modules)
@@ -25,13 +25,13 @@ def get_lora_sft_layers(model, process_index):
 	print(f"[ idx {process_index} ] lora layers for target_modules param:", target_modules)
 
 class CustomTrainerCallback(TrainerCallback):
-	def __init__(self, n_samples_snippet, trainer, dataset_train, dataset_val, dataset_test, sampling_engine, dvc, cli_args, accelerator=None, is_sft_training=False, log_every_n_steps=None, steps_per_epoch=None):
+	def __init__(self, n_samples_snippet, trainer, dataset_train, dataset_val, dataset_test, sampling_engine, dvc, cli_args, accelerator=None, is_sft_training=False, log_every_n_steps=None, steps_per_epoch=None, epoch_offset=0, initial_best_val=float("inf")):
 		self.trainer = trainer
 		self.sampling_engine = sampling_engine
 		self.cli_args = cli_args
 		self.dvc = dvc
 		self.accelerator = accelerator
-		self.best_val_delta_pbl_loss = float("inf")
+		self.best_val_delta_pbl_loss = initial_best_val
 		self.n_samples_snippet = n_samples_snippet
 		self.current_step_rewards = []
 
@@ -42,13 +42,14 @@ class CustomTrainerCallback(TrainerCallback):
 		self.is_sft_training = is_sft_training
 		self.log_every_n_steps = log_every_n_steps
 		self.steps_per_epoch = steps_per_epoch
+		self.epoch_offset = epoch_offset
 
 		self.all_prompts = json.load(open(os.getenv("PTH_ASSETS_METADATA_PROMPTS")))
 		self.all_assets_metadata_simple_descs = json.load(open(os.getenv("PTH_ASSETS_METADATA_SIMPLE_DESCS")))
 		
 	def on_log(self, args, state, control, logs=None, **kwargs):
 		if self.accelerator.is_main_process and logs is not None:
-			current_epoch = int(math.ceil(state.epoch))
+			current_epoch = int(math.ceil(state.epoch)) + self.epoch_offset
 
 			if self.cli_args.use_wandb and logs and "loss" in logs:
 
@@ -77,7 +78,7 @@ class CustomTrainerCallback(TrainerCallback):
 		# for GRPO / DPO
 		if not self.is_sft_training and state.global_step > 0 and state.global_step % self.log_every_n_steps == 0:
 			current_step = state.global_step
-			virtual_epoch = current_step / self.steps_per_epoch
+			virtual_epoch = (current_step / self.steps_per_epoch) + self.epoch_offset
 			
 			print(f"\nRunning evaluation at step {current_step} (virtual epoch: {virtual_epoch:.2f})")	
 			self._run_evaluation(state, virtual_epoch=virtual_epoch)
@@ -98,7 +99,7 @@ class CustomTrainerCallback(TrainerCallback):
 	def on_evaluate(self, args, state, control, metrics=None, **kwargs):
 		if self.is_sft_training:
 			self.accelerator.wait_for_everyone()
-			current_epoch = int(math.ceil(state.epoch))
+			current_epoch = int(math.ceil(state.epoch)) + self.epoch_offset
 			
 			print(f"\nRunning evaluation at epoch {current_epoch}")
 			self._run_evaluation(state, metrics=metrics)
@@ -107,7 +108,7 @@ class CustomTrainerCallback(TrainerCallback):
 	
 	def _run_evaluation(self, state, virtual_epoch=None, metrics=None):
 		# Your existing evaluation code from on_evaluate
-		current_epoch = int(math.ceil(state.epoch)) if virtual_epoch is None else virtual_epoch
+		current_epoch = int(math.ceil(state.epoch)) + self.epoch_offset if virtual_epoch is None else virtual_epoch
 		checkpoint_dir_last = f"./ckpts/{self.cli_args.jid}/checkpoint-last"
 		
 		if self.accelerator.is_main_process:
@@ -138,58 +139,129 @@ class CustomTrainerCallback(TrainerCallback):
 
 		# **************************************************
 		# run evaluation
-		
-		print(f"loading model from {checkpoint_dir_last} for evaluation...")
 
-		eval_model, eval_tokenizer, max_seq_length = get_model(checkpoint_dir_last, self.cli_args.use_gpu, self.accelerator)
-		if hasattr(eval_model, 'merge_and_unload'):
-			print("calling merge_and_unload()...")
-			eval_model_merged = eval_model.merge_and_unload()
-			print("model merged!")
+		use_fast_eval = getattr(self.cli_args, 'use_vllm', False) # and getattr(self.cli_args, 'do_rej_sft', False)
+
+		if use_fast_eval:
+			# Fast eval path: vLLM generation + threaded scoring (main process only)
+			max_seq_length = 3000
+			num_workers = getattr(self.cli_args, 'num_eval_workers', 1)
+
+			if self.accelerator.is_main_process:
+				eval_tokenizer = self.trainer.processing_class
+
+				# For DPO training, the trainer already has a persistent vLLM engine
+				# on cuda:1 with the latest weights (synced via _generate_vllm/load_weights
+				# every training step). Reuse it directly instead of creating a new one.
+				# For SFT/rej training, create a fresh engine from the saved checkpoint.
+				reuse_trainer_llm = hasattr(self.trainer, 'llm') and self.trainer.llm is not None
+
+				if reuse_trainer_llm:
+					print(f"reusing trainer's vLLM engine for fast evaluation...")
+					llm_engine = self.trainer.llm
+				else:
+					from utils import create_vllm_engine, destroy_vllm_engine
+
+					print(f"loading vLLM from {checkpoint_dir_last} for fast evaluation...")
+					gc.collect()
+					torch.cuda.empty_cache()
+					time.sleep(3.0)
+
+					# Note: create_vllm_engine now handles disabling deterministic algorithms internally
+					llm_engine = create_vllm_engine(checkpoint_dir_last, max_seq_length, device="cuda:1")
+
+				aggregated_metrics_train = run_test_fast(llm_engine, eval_tokenizer, self.accelerator, self.dvc, "train", self.cli_args.room_type, self.dataset_train, max_seq_length, self.sampling_engine, self.all_prompts, self.all_assets_metadata_simple_descs, self.cli_args.do_simple_descs, self.cli_args, do_print=False, epoch=current_epoch, num_workers=num_workers)
+				gc.collect()
+				torch.cuda.empty_cache()
+				time.sleep(3.0)
+
+				aggregated_metrics_val = run_test_fast(llm_engine, eval_tokenizer, self.accelerator, self.dvc, "val", self.cli_args.room_type, self.dataset_val, max_seq_length, self.sampling_engine, self.all_prompts, self.all_assets_metadata_simple_descs, self.cli_args.do_simple_descs, self.cli_args, do_print=False, epoch=current_epoch, num_workers=num_workers)
+				gc.collect()
+				torch.cuda.empty_cache()
+				time.sleep(3.0)
+
+				aggregated_metrics_test = run_test_fast(llm_engine, eval_tokenizer, self.accelerator, self.dvc, "test", self.cli_args.room_type, self.dataset_test, max_seq_length, self.sampling_engine, self.all_prompts, self.all_assets_metadata_simple_descs, self.cli_args.do_simple_descs, self.cli_args, do_print=False, epoch=current_epoch, num_workers=num_workers)
+				gc.collect()
+				torch.cuda.empty_cache()
+				time.sleep(3.0)
+
+				if not reuse_trainer_llm:
+					# Note: destroy_vllm_engine can optionally restore deterministic state, but we keep it disabled for compatibility
+					destroy_vllm_engine(llm_engine, restore_deterministic=False)
+
+				val_delta_pbl_loss = aggregated_metrics_val["scene_delta_pbl_loss"]
+
+				# save checkpoint-best
+				if val_delta_pbl_loss < self.best_val_delta_pbl_loss:
+					self.best_val_delta_pbl_loss = val_delta_pbl_loss
+					checkpoint_dir = f"./ckpts/{self.cli_args.jid}/checkpoint-best"
+					save_model_and_config(checkpoint_dir, self.accelerator, self.trainer.model, self.trainer.processing_class)
+					print("checkpoint-best saved!")
+					metadata = {
+						"epoch": current_epoch,
+						"best_val_delta_pbl_loss": val_delta_pbl_loss,
+					}
+					with open(os.path.join(checkpoint_dir, "best_val.json"), "w") as f:
+						json.dump(metadata, f, indent=4)
+				else:
+					print("no improvement in val loss; model not saved")
+
+			self.accelerator.wait_for_everyone()
+
 		else:
-			print("using unmerged model...")
-			eval_model_merged = eval_model
-		
-		aggregated_metrics_train = run_test(eval_model_merged, eval_tokenizer, self.accelerator, self.dvc, "train", self.cli_args.room_type, self.dataset_train, max_seq_length, self.sampling_engine, self.all_prompts, self.all_assets_metadata_simple_descs, self.cli_args.do_simple_descs, self.cli_args, n_best_of_n_llm=self.cli_args.n_best_of_n_llm, do_print=False, epoch=current_epoch)
-		gc.collect()
-		torch.cuda.empty_cache()
-		time.sleep(3.0)
-		
-		aggregated_metrics_val = run_test(eval_model_merged, eval_tokenizer, self.accelerator, self.dvc, "val", self.cli_args.room_type, self.dataset_val, max_seq_length, self.sampling_engine, self.all_prompts, self.all_assets_metadata_simple_descs, self.cli_args.do_simple_descs, self.cli_args, n_best_of_n_llm=self.cli_args.n_best_of_n_llm, do_print=False, epoch=current_epoch)
-		gc.collect()
-		torch.cuda.empty_cache()
-		time.sleep(3.0)
+			# Standard eval path: load eval model, call run_test() on all processes
+			print(f"loading model from {checkpoint_dir_last} for evaluation...")
 
-		aggregated_metrics_test = run_test(eval_model_merged, eval_tokenizer, self.accelerator, self.dvc, "test", self.cli_args.room_type, self.dataset_test, max_seq_length, self.sampling_engine, self.all_prompts, self.all_assets_metadata_simple_descs, self.cli_args.do_simple_descs, self.cli_args, n_best_of_n_llm=self.cli_args.n_best_of_n_llm, do_print=False, epoch=current_epoch)
-		gc.collect()
-		torch.cuda.empty_cache()
-		time.sleep(3.0)
-
-		val_delta_pbl_loss = aggregated_metrics_val["scene_delta_pbl_loss"]
-
-		# save checkpoint-best
-		if self.accelerator.is_main_process:
-			if val_delta_pbl_loss < self.best_val_delta_pbl_loss:
-				self.best_val_delta_pbl_loss = val_delta_pbl_loss
-				checkpoint_dir = f"./ckpts/{self.cli_args.jid}/checkpoint-best"
-				save_model_and_config(checkpoint_dir, self.accelerator, self.trainer.model, self.trainer.processing_class)
-				print("checkpoint-best saved!")
-				metadata = {
-					"epoch": current_epoch,
-					"best_val_delta_pbl_loss": val_delta_pbl_loss,
-				}
-				with open(os.path.join(checkpoint_dir, "best_val.json"), "w") as f:
-					json.dump(metadata, f, indent=4)
+			eval_model, eval_tokenizer, max_seq_length = get_model(checkpoint_dir_last, self.cli_args.use_gpu, self.accelerator)
+			if hasattr(eval_model, 'merge_and_unload'):
+				print("calling merge_and_unload()...")
+				eval_model_merged = eval_model.merge_and_unload()
+				print("model merged!")
 			else:
-				print("no improvement in val loss; model not saved")
+				print("using unmerged model...")
+				eval_model_merged = eval_model
 
-		del eval_model_merged
-		gc.collect()
-		torch.cuda.empty_cache()
-		time.sleep(3.0)
+			aggregated_metrics_train = run_test(eval_model_merged, eval_tokenizer, self.accelerator, self.dvc, "train", self.cli_args.room_type, self.dataset_train, max_seq_length, self.sampling_engine, self.all_prompts, self.all_assets_metadata_simple_descs, self.cli_args.do_simple_descs, self.cli_args, n_best_of_n_llm=self.cli_args.n_best_of_n_llm, do_print=False, epoch=current_epoch)
+			gc.collect()
+			torch.cuda.empty_cache()
+			time.sleep(3.0)
+
+			aggregated_metrics_val = run_test(eval_model_merged, eval_tokenizer, self.accelerator, self.dvc, "val", self.cli_args.room_type, self.dataset_val, max_seq_length, self.sampling_engine, self.all_prompts, self.all_assets_metadata_simple_descs, self.cli_args.do_simple_descs, self.cli_args, n_best_of_n_llm=self.cli_args.n_best_of_n_llm, do_print=False, epoch=current_epoch)
+			gc.collect()
+			torch.cuda.empty_cache()
+			time.sleep(3.0)
+
+			aggregated_metrics_test = run_test(eval_model_merged, eval_tokenizer, self.accelerator, self.dvc, "test", self.cli_args.room_type, self.dataset_test, max_seq_length, self.sampling_engine, self.all_prompts, self.all_assets_metadata_simple_descs, self.cli_args.do_simple_descs, self.cli_args, n_best_of_n_llm=self.cli_args.n_best_of_n_llm, do_print=False, epoch=current_epoch)
+			gc.collect()
+			torch.cuda.empty_cache()
+			time.sleep(3.0)
+
+			val_delta_pbl_loss = aggregated_metrics_val["scene_delta_pbl_loss"]
+
+			# save checkpoint-best
+			if self.accelerator.is_main_process:
+				if val_delta_pbl_loss < self.best_val_delta_pbl_loss:
+					self.best_val_delta_pbl_loss = val_delta_pbl_loss
+					checkpoint_dir = f"./ckpts/{self.cli_args.jid}/checkpoint-best"
+					save_model_and_config(checkpoint_dir, self.accelerator, self.trainer.model, self.trainer.processing_class)
+					print("checkpoint-best saved!")
+					metadata = {
+						"epoch": current_epoch,
+						"best_val_delta_pbl_loss": val_delta_pbl_loss,
+					}
+					with open(os.path.join(checkpoint_dir, "best_val.json"), "w") as f:
+						json.dump(metadata, f, indent=4)
+				else:
+					print("no improvement in val loss; model not saved")
+
+			del eval_model_merged
+			gc.collect()
+			torch.cuda.empty_cache()
+			time.sleep(3.0)
+
+			self.accelerator.wait_for_everyone()
 
 		print("\nEvaluation complete, resuming training...\n")
-		self.accelerator.wait_for_everyone()
 
 def save_model_and_config(checkpoint_dir, accelerator, model, tokenizer):
 	os.makedirs(checkpoint_dir, exist_ok=True)

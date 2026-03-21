@@ -16,26 +16,26 @@ import traceback
 # from sentence_transformers import SentenceTransformer
 import os
 import copy
-
+import time
 
 class AssetRetrievalModule(nn.Module):
-	def __init__(self, lambd, sigma, temp, top_p, top_k, asset_size_threshold, rand_seed=None, accelerator=None, dvc=None, do_print=False, is_sft_training=False):
+	def __init__(self, lambd, sigma, temp, top_p, top_k, asset_size_threshold, rand_seed=None, accelerator=None, dvc=None, do_print=False, is_sft_training=False, pth_base=None):
 		# torch.use_deterministic_algorithms(False)
 		super().__init__()
 
 		self.accelerator = accelerator
 		self.dvc = dvc
 
-		self.all_assets_metadata = json.load(open(os.getenv("PTH_ASSETS_METADATA")))
-		self.all_assets_metadata_scaled = json.load(open(os.getenv("PTH_ASSETS_METADATA_SCALED")))
+		self.all_assets_metadata = json.load(open(os.getenv("PTH_ASSETS_METADATA") if pth_base is None else os.path.join(pth_base, os.getenv("PTH_ASSETS_METADATA"))))
+		self.all_assets_metadata_scaled = json.load(open(os.getenv("PTH_ASSETS_METADATA_SCALED") if pth_base is None else os.path.join(pth_base, os.getenv("PTH_ASSETS_METADATA_SCALED"))))
 
-		# config = SiglipTextConfig.from_pretrained("google/siglip-so400m-patch14-384")
+		# config = SiglipTextConfig.from_pretrained("google/si§glip-so400m-patch14-384")
 		# config.max_position_embeddings = 64
 		# self.siglip_model = SiglipTextModel.from_pretrained("google/siglip-so400m-patch14-384", config=config)
 		self.siglip_model = SiglipTextModel.from_pretrained("google/siglip-so400m-patch14-384")
 		self.siglip_tokenizer = AutoTokenizer.from_pretrained("google/siglip-so400m-patch14-384")
 		
-		with open(os.getenv("PTH_ASSETS_EMBED"), 'rb') as fp: 
+		with open(os.getenv("PTH_ASSETS_EMBED") if pth_base is None else os.path.join(pth_base, os.getenv("PTH_ASSETS_EMBED")), 'rb') as fp: 
 			model_info_martin_embeds = pickle.load(fp)
 
 		all_embeds = np.array(model_info_martin_embeds.get("embeds"))
@@ -158,6 +158,7 @@ class AssetRetrievalModule(nn.Module):
 
 	def compute_semantic_similarities(self, embeds):
 		embeds_norm = torch.nn.functional.normalize(embeds, p=2, dim=1)
+		embeds_norm = embeds_norm.to(self.all_embeds_catalog.dtype)
 
 		torch.use_deterministic_algorithms(False)
 		torch.backends.cudnn.deterministic = False
@@ -303,6 +304,9 @@ class AssetRetrievalModule(nn.Module):
 		else:
 			jid_sampled_obj = obj.get("jid")
 
+		# if obj.get("jid"):
+		# 	pdb.set_trace()
+
 		asset = self.all_assets_metadata.get(jid_sampled_obj)
 		if asset == None:
 			asset = self.all_assets_metadata_scaled.get(jid_sampled_obj)
@@ -381,6 +385,9 @@ class AssetRetrievalModule(nn.Module):
 	# sample only last object in the list
 	def sample_last_asset(self, scene, is_greedy_sampling=True):
 
+		# start timing
+		# start_time = time.time()
+
 		if self.do_print:
 			print(f"sampling last object in scene...")
 
@@ -396,6 +403,8 @@ class AssetRetrievalModule(nn.Module):
 
 			new_obj = self.create_sampled_obj(last_obj, probs[0], is_greedy_sampling)
 			sampled_scene["objects"].append(new_obj)
+
+		# print("sampling took {time:.2f} seconds".format(time=time.time() - start_time))
 
 		return sampled_scene
 

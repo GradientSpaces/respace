@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import pandas as pd
 import torch
@@ -18,14 +20,12 @@ from trimesh.voxel.encoding import DenseEncoding
 from trimesh.transformations import quaternion_matrix
 from scipy.spatial.transform import Rotation as R
 import copy
-from transformers import AutoProcessor, AutoModelForVision2Seq, PaliGemmaForConditionalGeneration, AutoModelForCausalLM, AutoTokenizer, Qwen2_5_VLForConditionalGeneration
-from accelerate import Accelerator
-from qwen_vl_utils import process_vision_info
-import gc
+import shutil
+from nltk.stem import PorterStemmer
+import re
 
-from src.utils import get_pth_mesh, create_floor_plan_polygon, compute_fid_scores, get_scene_hash, get_vlm_prompt, compute_diversity_score
+from src.utils import get_pth_mesh, create_floor_plan_polygon, compute_fid_scores, get_scene_hash, compute_diversity_score, is_rectangular_room, is_high_quality_sample, find_removed_objects, classify_confusion_type
 from src.viz import render_full_scene_and_export_with_gif, render_instr_scene_and_export_with_gif
-from src.dataset import create_full_scene_from_before_and_added
 
 def get_xz_bbox_from_obj(obj):
 
@@ -343,10 +343,14 @@ def prepare_asset(obj, voxel_size, metric_type, is_debug=False):
 	# read from cache or create new voxelization
 	# print(os.getenv("PTH_3DFUTURE_ASSETS"), asset_jid, f"rot-{str(asset_rot_y_euler_angle)}-scale-{str(voxel_size)}")
 	pth_voxelized_mesh = os.path.join(os.getenv("PTH_3DFUTURE_ASSETS"), asset_jid, f"rot-{str(asset_rot_y_euler_angle)}-scale-{str(voxel_size)}.pkl")
-
+	
+	# start_time = time.time()
+	
 	if os.path.isfile(pth_voxelized_mesh):
+		
 		with open(pth_voxelized_mesh, 'rb') as fp: 
 			asset_voxel_matrix = pickle.load(fp)
+			# print(f"loaded asset — took {time.time() - start_time:.2f} seconds")
 	else:
 		# trimesh expects wxyz instead of xyzw so we need to convert
 		# we assume that rotation is roughly precise although we cache by single digit precision only
@@ -362,6 +366,8 @@ def prepare_asset(obj, voxel_size, metric_type, is_debug=False):
 		#show_colored_voxels_as_trimesh_scene(rotated_asset_matrix, pitch=voxel_size)
 	# visualize_raw_and_rotated_asset(raw_asset_matrix, rotated_asset_matrix)
 
+		# print(f"VOXELIZED ASSET — took {time.time() - start_time:.2f} seconds")
+
 	asset_pos = np.array(obj.get("pos"))
 	asset_pos_voxels = np.floor(asset_pos / voxel_size)
 
@@ -376,8 +382,8 @@ def prepare_asset(obj, voxel_size, metric_type, is_debug=False):
 
 	return asset_voxel_matrix, asset_shift_from_origin
 
-def occupancy_overlap(voxel_matrix_a, voxel_matrix_b, offset_b):
-	# overlap_matrix = voxel_matrix_a.copy().astype(int)
+def occupancy_overlap_old(voxel_matrix_a, voxel_matrix_b, offset_b):
+	"""Original triple-loop version for sanity checking."""
 	overlap_matrix = copy.deepcopy(voxel_matrix_a).astype(int)
 	for i in range(voxel_matrix_b.shape[0]):
 		for j in range(voxel_matrix_b.shape[1]):
@@ -385,9 +391,27 @@ def occupancy_overlap(voxel_matrix_a, voxel_matrix_b, offset_b):
 				if voxel_matrix_b[i, j, k]:
 					shifted_pos = (i + offset_b[0], j + offset_b[1], k + offset_b[2])
 					if 0 <= shifted_pos[0] < overlap_matrix.shape[0] and 0 <= shifted_pos[1] < overlap_matrix.shape[1] and 0 <= shifted_pos[2] < overlap_matrix.shape[2]:
-						# print(shifted_pos)
 						overlap_matrix[shifted_pos[0], shifted_pos[1], shifted_pos[2]] += 1
-	# visualize_voxels_mayavi(overlap_matrix == 2, voxel_size)
+	return (overlap_matrix == 2)
+
+def occupancy_overlap(voxel_matrix_a, voxel_matrix_b, offset_b):
+	overlap_matrix = np.zeros_like(voxel_matrix_a, dtype=int)
+	overlap_matrix[voxel_matrix_a] = 1
+
+	# get occupied voxel coordinates from B
+	indices = np.argwhere(voxel_matrix_b)
+	if len(indices) == 0:
+		return overlap_matrix == 2
+
+	shifted = indices + np.array(offset_b)
+	# filter to valid bounds
+	shape = np.array(overlap_matrix.shape)
+	valid = np.all((shifted >= 0) & (shifted < shape), axis=1)
+	shifted_valid = shifted[valid]
+
+	if len(shifted_valid) > 0:
+		overlap_matrix[shifted_valid[:, 0], shifted_valid[:, 1], shifted_valid[:, 2]] += 1
+
 	return (overlap_matrix == 2)
 
 def compute_mesh_oob(obj, voxel_size, room_origin_shift, room_voxel_matrix, voxel_volume, is_debug=False):
@@ -476,20 +500,54 @@ def compute_mesh_bbl(obj_x, obj_y, voxel_size, voxel_volume, is_debug=False):
 
 	return mesh_bbl
 
+# def compute_pms_score(prompt, new_obj_desc):
+# 	if prompt == None:
+# 		return float("inf")
+
+# 	prompt_words = prompt.split(" ")
+# 	correct_words = 0
+# 	for word in prompt_words:
+# 		if word in new_obj_desc.lower():
+# 			correct_words += 1
+
+# 	# for pms, compute recall: how many words from the prompt are in the generated desc
+# 	score = correct_words / len(prompt_words)
+# 	# print(prompt_words, new_obj_desc, score)
+
+# 	return score
+
 def compute_pms_score(prompt, new_obj_desc):
-	if prompt == None:
+	if prompt is None:
 		return float("inf")
 
-	prompt_words = prompt.split(" ")
+	ps = PorterStemmer()
+	
+	# Clean and stem the description once for efficiency
+	# We use regex to remove punctuation so "cushion," matches "cushion"
+	desc_words = re.findall(r'\w+', new_obj_desc.lower())
+	stemmed_desc = {ps.stem(word) for word in desc_words}
+
+	prompt_words = re.findall(r'\w+', prompt.lower())
+	stemmed_prompt_words = [ps.stem(word) for word in prompt_words]
+	
 	correct_words = 0
-	for word in prompt_words:
-		if word in new_obj_desc.lower():
+	for word in stemmed_prompt_words:
+		# Check if the stemmed prompt word exists in the stemmed description set
+		if word in stemmed_desc:
 			correct_words += 1
+	
+	# print("new_obj_desc:", new_obj_desc, "prompt", prompt)
+	# print("stemmed desc:", stemmed_desc)
+	# print("stemmed prompt words:", stemmed_prompt_words)
 
-	# for pms, compute recall: how many words from the prompt are in the generated desc
+	# # Debug print to see exactly what's missing
+	# missing = [w for w in stemmed_prompt_words if w not in stemmed_desc]
+	# if missing:
+	# 	print(f"DEBUG: Missing words from prompt: {missing}")
+	# else:
+	# 	print("DEBUG: All words present!")
+
 	score = correct_words / len(prompt_words)
-	# print(prompt_words, new_obj_desc, score)
-
 	return score
 
 def compute_dss_score(new_obj_desc, gt_obj_desc, sampling_engine):
@@ -510,25 +568,133 @@ def eval_bounds(scene):
 	else:
 		return False
 
-def eval_scene(scene, is_debug=True, voxel_size=0.05, total_loss_threshold=0.1, idx=None, do_pms_full_scene=False):
+def evaluate_seq_step_add(step: dict, result_scene: dict, scene_before: dict, sampling_engine=None) -> dict:
+	n_before = len(scene_before.get("objects", []))
+	n_after  = len(result_scene.get("objects", []))
 
+	if n_after != n_before + 1:
+		return {
+			"op":         "add",
+			"is_success": False,
+			"pms_score":  0.0,
+			"delta_pbl":  float("inf"),
+			"size_l2":    float("inf"),
+		}
+
+	# Inject prompt onto last object so eval_scene computes PMS correctly
+	result_scene = copy.deepcopy(result_scene)
+	result_scene["objects"][-1]["prompt"] = step["add_prompt"]
+
+	result    = eval_scene_before_after_with_delta(scene_before, result_scene, is_debug=False, do_pms_full_scene=False)
+	pms_score = result.get("txt_pms_sampled_score", 0.0)
+	delta_pbl = result.get("delta_pbl_loss", float("inf"))
+
+	new_obj_size = result_scene["objects"][-1].get("size")
+	gt_obj_size  = step["add_obj_gt"].get("size")
+	size_l2      = compute_size_l2_dist(new_obj_size, gt_obj_size) if (new_obj_size and gt_obj_size) else float("inf")
+
+	new_obj_desc = result_scene["objects"][-1].get("desc", "")
+
+	is_success = is_high_quality_sample(
+		delta_pbl_loss=delta_pbl,
+		txt_pms_sampled_score=pms_score,
+		size_l2_dist=size_l2,
+		txt_dss_score=0.0,
+		desc=new_obj_desc,
+	)
+
+	print(f"is HQ sample? {is_success} | delta_pbl: {delta_pbl} | pms_score: {pms_score} | size_l2: {size_l2}")
+	# print(f"delta_pbl: {delta_pbl} | pms_score: {pms_score} | size_l2: {size_l2}")
+
+	return {
+		"op":         "add",
+		"is_success": bool(is_success),
+		"pms_score":  pms_score,
+		"delta_pbl":  delta_pbl,
+		"size_l2":    size_l2,
+	}
+
+
+def evaluate_seq_step_remove(step: dict, result_scene: dict, scene_before: dict) -> dict:
+	target_desc = step["remove_obj_gt"]["desc"]
+
+	# Success = target desc is gone from the scene (mirrors generate_instr_scene policy)
+	remaining_descs = [obj.get("desc") for obj in result_scene.get("objects", [])]
+	is_success = target_desc not in remaining_descs
+
+	# Count how many objects were actually removed (diagnostic)
+	# removed_objects = find_removed_objects(scene_before, result_scene)
+	# n_removed = len(removed_objects)
+
+	# Confusion type (only if category lookup is available)
+	# confusion_type = None
+	# if desc_to_category is not None:
+	#     target_category   = desc_to_category.get(target_desc, "unknown")
+	#     removed_categories = [desc_to_category.get(obj.get("desc"), "unknown") for obj in removed_objects]
+	#     confusion_type = classify_confusion_type(target_category, removed_categories)
+
+	print("is successfully removed via desc matching?", is_success)
+
+	return {
+		"op":            "remove",
+		"is_success":    bool(is_success),
+		# "n_removed":     n_removed,
+	}
+
+def build_eval_cache_room(scene, voxel_size=0.05):
+	"""Pre-compute room mesh/voxel data (room-only, independent of objects)."""
 	bounds_top = scene.get("bounds_top")
 	bounds_bottom = scene.get("bounds_bottom")
 	floor_plan_polygon = create_floor_plan_polygon(bounds_bottom)
-	objs = scene.get("objects")
-	voxel_volume = voxel_size ** 3
-
-	# voxelize room mesh
 	room_mesh = create_room_mesh(bounds_bottom, bounds_top, floor_plan_polygon)
 	room_voxels = room_mesh.voxelized(pitch=voxel_size).fill()
 	room_voxel_matrix = room_voxels.matrix
 	room_size_voxels = np.ceil(abs(room_mesh.bounds[0] - room_mesh.bounds[1]) / voxel_size)
 	room_origin_shift = np.array([room_size_voxels[0] / 2.0, 0, room_size_voxels[2] / 2.0])
 
+	return {
+		'floor_plan_polygon': floor_plan_polygon,
+		'bounds_bottom': bounds_bottom,
+		'bounds_top': bounds_top,
+		'room_voxel_matrix': room_voxel_matrix,
+		'room_origin_shift': room_origin_shift,
+		'voxel_size': voxel_size,
+		'voxel_volume': voxel_size ** 3,
+	}
+
+def eval_scene(scene, is_debug=True, voxel_size=0.05, total_loss_threshold=0.1, idx=None, do_pms_full_scene=False, eval_cache=None):
+
+	# start_time = time.time()
+
+	if eval_cache is not None:
+		bounds_top = eval_cache['bounds_top']
+		bounds_bottom = eval_cache['bounds_bottom']
+		floor_plan_polygon = eval_cache['floor_plan_polygon']
+		room_voxel_matrix = eval_cache['room_voxel_matrix']
+		room_origin_shift = eval_cache['room_origin_shift']
+		voxel_size = eval_cache['voxel_size']
+		voxel_volume = eval_cache['voxel_volume']
+	else:
+		bounds_top = scene.get("bounds_top")
+		bounds_bottom = scene.get("bounds_bottom")
+		floor_plan_polygon = create_floor_plan_polygon(bounds_bottom)
+		voxel_volume = voxel_size ** 3
+
+		# voxelize room mesh
+		room_mesh = create_room_mesh(bounds_bottom, bounds_top, floor_plan_polygon)
+		room_voxels = room_mesh.voxelized(pitch=voxel_size).fill()
+		room_voxel_matrix = room_voxels.matrix
+		room_size_voxels = np.ceil(abs(room_mesh.bounds[0] - room_mesh.bounds[1]) / voxel_size)
+		room_origin_shift = np.array([room_size_voxels[0] / 2.0, 0, room_size_voxels[2] / 2.0])
+
+	objs = scene.get("objects")
+
 	mesh_oobs, mesh_bbls = [], []
 	
 	idx_highest_pbl_loss = None
 	highest_pbl_loss = float("-inf")
+
+	# print(f"prep time took {time.time() - start_time:.2f} seconds")
 
 	if objs is not None:
 		for i, obj_x in enumerate(objs):
@@ -569,6 +735,8 @@ def eval_scene(scene, is_debug=True, voxel_size=0.05, total_loss_threshold=0.1, 
 				idx_highest_pbl_loss = i
 				highest_pbl_loss = obj_pbl
 
+			# print(f"object {i} took {time.time() - start_time:.2f} seconds")
+
 	metrics = {
 		'total_oob_loss': np.sum(mesh_oobs).item() if len(mesh_oobs) > 0 else 0.0,
 		'total_mbl_loss': np.sum(mesh_bbls).item() if len(mesh_bbls) > 0 else 0.0,
@@ -579,6 +747,12 @@ def eval_scene(scene, is_debug=True, voxel_size=0.05, total_loss_threshold=0.1, 
 	}
 
 	metrics["total_pbl_loss"] = metrics['total_oob_loss'] + metrics['total_mbl_loss']
+
+	# round losses to 1e-15 precision to avoid floating point issues when comparing to threshold
+	metrics['total_oob_loss'] = round(metrics['total_oob_loss'], 15)
+	metrics['total_mbl_loss'] = round(metrics['total_mbl_loss'], 15)
+	metrics['total_pbl_loss'] = round(metrics['total_pbl_loss'], 15)
+
 	metrics['is_valid_scene_pbl'] = bool(metrics['total_pbl_loss'] <= total_loss_threshold)
 
 	# metrics["txt_pms_score"] = float('inf')
@@ -612,14 +786,105 @@ def eval_scene(scene, is_debug=True, voxel_size=0.05, total_loss_threshold=0.1, 
 
 	return metrics
 
-def eval_scene_before_after_with_delta(scene_before, scene_after, is_debug=False):
-	before_metrics = eval_scene(scene_before, is_debug=False)
-	
+def eval_scene_incremental(scene_after, before_metrics, eval_cache, total_loss_threshold=0.1):
+	"""Evaluate only the newly added (last) object's contribution.
+
+	Assumes all objects except the last are unchanged from before_metrics.
+	Only computes OOB for the new object and BBL between the new object and each old object.
+	Returns same format as eval_scene_before_after_with_delta.
+	"""
+	objs = scene_after.get("objects")
+	if objs is None or len(objs) == 0:
+		return {
+			'is_valid_scene_pbl': before_metrics.get('is_valid_scene_pbl', True),
+			'scene': scene_after,
+			'total_oob_loss': before_metrics['total_oob_loss'],
+			'total_mbl_loss': before_metrics['total_mbl_loss'],
+			'total_pbl_loss': before_metrics['total_pbl_loss'],
+			'delta_oob_loss': 0.0,
+			'delta_mbl_loss': 0.0,
+			'delta_pbl_loss': 0.0,
+			'txt_pms_score': 0.0,
+			'txt_pms_sampled_score': 0.0,
+		}
+
+	floor_plan_polygon = eval_cache['floor_plan_polygon']
+	bounds_bottom = eval_cache['bounds_bottom']
+	bounds_top = eval_cache['bounds_top']
+	room_voxel_matrix = eval_cache['room_voxel_matrix']
+	room_origin_shift = eval_cache['room_origin_shift']
+	voxel_size = eval_cache['voxel_size']
+	voxel_volume = eval_cache['voxel_volume']
+
+	new_obj = objs[-1]
+	old_objs = objs[:-1]
+
+	# --- OOB for new object only ---
+	new_obj_oob = compute_oob(new_obj, floor_plan_polygon, bounds_bottom, bounds_top, is_debug=False)
+	if new_obj_oob > 0.0:
+		try:
+			new_obj_mesh_oob = compute_mesh_oob(new_obj, voxel_size, room_origin_shift, room_voxel_matrix, voxel_volume, is_debug=False)
+		except Exception as e:
+			print(f"Error computing mesh oob for {new_obj.get('desc')}: {e}")
+			new_obj_mesh_oob = 0.0
+	else:
+		new_obj_mesh_oob = 0.0
+
+	# --- BBL between new object and each old object ---
+	new_obj_mesh_bbls = []
+	for old_obj in old_objs:
+		bbl = compute_bbl(new_obj, old_obj, is_debug=False)
+		if bbl > 0.0:
+			try:
+				mesh_bbl = compute_mesh_bbl(new_obj, old_obj, voxel_size, voxel_volume, is_debug=False)
+			except Exception as e:
+				print(f"Error computing mesh bbl for {new_obj.get('desc')} and {old_obj.get('desc')}: {e}")
+				mesh_bbl = 0.0
+			new_obj_mesh_bbls.append(mesh_bbl)
+		else:
+			new_obj_mesh_bbls.append(0.0)
+
+	delta_oob = round(new_obj_mesh_oob, 15)
+	delta_mbl = round(np.sum(new_obj_mesh_bbls).item() if len(new_obj_mesh_bbls) > 0 else 0.0, 15)
+	delta_pbl = round(delta_oob + delta_mbl, 15)
+
+	total_oob = round(before_metrics['total_oob_loss'] + delta_oob, 15)
+	total_mbl = round(before_metrics['total_mbl_loss'] + delta_mbl, 15)
+	total_pbl = round(total_oob + total_mbl, 15)
+
+	# --- PMS for new object only ---
+	txt_pms_score = 0.0
+	txt_pms_sampled_score = 0.0
+	if new_obj.get("prompt") is not None:
+		txt_pms_score = compute_pms_score(new_obj.get("prompt"), new_obj.get("desc"))
+		txt_pms_sampled_score = compute_pms_score(new_obj.get("prompt"), new_obj.get("sampled_asset_desc"))
+
+	return {
+		'is_valid_scene_pbl': bool(total_pbl <= total_loss_threshold),
+		'scene': scene_after,
+		'total_oob_loss': total_oob,
+		'total_mbl_loss': total_mbl,
+		'total_pbl_loss': total_pbl,
+		'delta_oob_loss': delta_oob,
+		'delta_mbl_loss': delta_mbl,
+		'delta_pbl_loss': delta_pbl,
+		'txt_pms_score': txt_pms_score,
+		'txt_pms_sampled_score': txt_pms_sampled_score,
+	}
+
+def eval_scene_before_after_with_delta(scene_before, scene_after, is_debug=False, do_pms_full_scene=False, before_metrics=None, eval_cache=None):
+	if before_metrics is None:
+		before_metrics = eval_scene(scene_before, is_debug=False, do_pms_full_scene=do_pms_full_scene, eval_cache=eval_cache)
+
 	if is_debug:
 		print(f"before metrics: {before_metrics}")
 
-	after_metrics = eval_scene(scene_after, is_debug=is_debug)
-	
+	# use incremental eval when we have cached data (only evaluates the new object)
+	if before_metrics is not None and eval_cache is not None:
+		return eval_scene_incremental(scene_after, before_metrics, eval_cache)
+
+	after_metrics = eval_scene(scene_after, is_debug=is_debug, do_pms_full_scene=do_pms_full_scene, eval_cache=eval_cache)
+
 	return {
 		'is_valid_scene_pbl': after_metrics['is_valid_scene_pbl'],
 		'scene': scene_after,
@@ -633,7 +898,7 @@ def eval_scene_before_after_with_delta(scene_before, scene_after, is_debug=False
 		'txt_pms_sampled_score': after_metrics['txt_pms_sampled_score'],
 	}
 
-def compute_mean_metrics_for_seed(room_type, is_full_scene, metrics_list, pth_output, n_test_scenes):
+def compute_mean_metrics_for_seed(room_type, is_full_scene, metrics_list, pth_output, n_test_scenes, do_rectangular_only=False):
 
 	mean_metrics = {
 		'total_oob_loss': np.mean([m['total_oob_loss'] for m in metrics_list]),
@@ -655,10 +920,35 @@ def compute_mean_metrics_for_seed(room_type, is_full_scene, metrics_list, pth_ou
 		mean_metrics['delta_mbl_loss'] = np.mean([m['delta_mbl_loss'] for m in metrics_list])
 		mean_metrics['delta_pbl_loss'] = np.mean([m['delta_pbl_loss'] for m in metrics_list])
 
-	compute_fid_scores("diag", fid_score_name=f"3d-front-train-{'full' if is_full_scene else 'instr'}-scenes-{room_type}-diag", pth_src=f"{os.getenv('PTH_EVAL_VIZ_CACHE')}/3d-front-train-{'full' if is_full_scene else 'instr'}-scenes-{room_type}/diag", pth_gen=f"{pth_output}/diag", aggregated_metrics=mean_metrics, do_renderings=True, dataset_res=1024)
-	compute_fid_scores("top", fid_score_name=f"3d-front-train-{'full' if is_full_scene else 'instr'}-scenes-{room_type}-top", pth_src=f"{os.getenv('PTH_EVAL_VIZ_CACHE')}/3d-front-train-{'full' if is_full_scene else 'instr'}-scenes-{room_type}/top", pth_gen=f"{pth_output}/top", aggregated_metrics=mean_metrics, do_renderings=True, dataset_res=1024)
+	# compute_fid_scores(
+	# 	"diag", 
+	# 	fid_score_name=f"3d-front-train-{'full' if is_full_scene else 'instr'}-scenes-{room_type}-diag", 
+	# 	pth_src=f"{os.getenv('PTH_EVAL_VIZ_CACHE')}/3d-front-train-{'full' if is_full_scene else 'instr'}-scenes-{room_type}/diag", 
+	# 	pth_gen=f"{pth_output}/diag", 
+	# 	aggregated_metrics=mean_metrics, 
+	# 	do_renderings=True, 
+	# 	dataset_res=1024
+	# )
 
-	compute_diversity_score("top", pth_gen=f"{pth_output}/diag", do_renderings=True, dvc="cuda", aggregated_metrics=mean_metrics)
+	fid_score_name = f"3d-front-train-{'full' if is_full_scene else 'instr'}-scenes{'-rectangular' if do_rectangular_only else ''}-{room_type}-top"
+	pth_gen = f"{pth_output}/top" if not do_rectangular_only else f"{pth_output}/top-rectangular"
+	
+	compute_fid_scores(
+		"top", 
+		fid_score_name=fid_score_name, 
+		pth_src=f"{os.getenv('PTH_EVAL_VIZ_CACHE')}/3d-front-train-{'full' if is_full_scene else 'instr'}-scenes-{room_type}/top", 
+		pth_gen=pth_gen,
+		aggregated_metrics=mean_metrics, 
+		do_renderings=True, 
+		dataset_res=1024
+	)
+
+	compute_diversity_score(
+		"top", 
+		pth_gen=pth_gen,
+		do_renderings=True, dvc="cuda", 
+		aggregated_metrics=mean_metrics
+	)
 
 	return mean_metrics
 
@@ -770,7 +1060,7 @@ def run_eval(args):
 
 	print("running eval for pth_output:", args.pth_output)
 
-	env_file = f".env.{args.env}"
+	env_file = f"{args.env}"
 	load_dotenv(env_file)
 
 	# train_scene_hashes = get_all_train_scene_hashes_for_room_type(args.room_type)
@@ -781,7 +1071,10 @@ def run_eval(args):
 	all_n_samples_actual = []
 
 	rand_seeds = [1234, 3456, 5678]
-	# rand_seeds = [ 5678 ]
+
+	if args.seed_only is not None:
+		rand_seeds = [args.seed_only]
+		print(f"using seed {args.seed_only} only")
 
 	# all_metrics_raw_seed = json.load(open("/home/martinbucher/git/stan-24-sgllm/eval/metrics-raw/eval_samples_respace_instr_bedroom_qwen1.5B_raw_V2.json"))
 
@@ -796,7 +1089,7 @@ def run_eval(args):
 		n_samples_actual = len([f for f in os.listdir(Path(args.pth_input) / str(rand_seed)) if f.endswith('.json') and not f.startswith(".")])
 		if n_samples_actual == 0:
 			print("no scenes found... skipping eval for rand seed", rand_seed)
-			return
+			continue
 		
 		n_samples_actual = min(n_samples_actual, args.n_test_scenes)
 		all_n_samples_actual.append(n_samples_actual)
@@ -811,13 +1104,28 @@ def run_eval(args):
 			# print(f"evaluating scene {pth}...")
 			scene = json.load(open(pth_input / pth))
 			idx = int(pth.split("_")[0])
+
+			if args.do_rectangular_only and (not is_rectangular_room(scene.get("bounds_bottom"))):
+				print(f"Skipping non-rectangular room for scene {idx}...")
+				continue
 			
 			if args.is_full_scene:
-				render_full_scene_and_export_with_gif(scene, idx, pth_output=pth_viz_output, create_gif=args.create_gifs)
+				# if viz exists already, then skip rendering
+				if not os.path.isfile(pth_viz_output / "top" / f"{idx}.jpg"):
+					print("doing rendering in eval.py")
+					render_full_scene_and_export_with_gif(scene, idx, pth_output=pth_viz_output, create_gif=args.create_gifs)
+				else:
+					# copy paste file into separate folder for rectangular only scenes
+					if args.do_rectangular_only:
+						os.makedirs(pth_viz_output / "top-rectangular", exist_ok=True)
+						shutil.copy(pth_viz_output / "top" / f"{idx}.jpg", pth_viz_output / "top-rectangular" / f"{idx}.jpg")
 				metrics = eval_scene(scene, is_debug=False)
 				metrics["scene"] = scene
 			else:
-				render_instr_scene_and_export_with_gif(scene, idx, pth_output=pth_viz_output, create_gif=args.create_gifs)
+				# if viz scene exists already, then skip rendering
+				if not os.path.isfile(pth_viz_output / "top" / f"{idx}.jpg"):
+					print("doing rendering in eval.py")
+					render_instr_scene_and_export_with_gif(scene, idx, pth_output=pth_viz_output, create_gif=args.create_gifs)
 				scene_before = copy.deepcopy(scene)
 				scene_before["objects"] = scene_before["objects"][:-1]
 				metrics = eval_scene_before_after_with_delta(scene_before, scene_after=scene, is_debug=False)
@@ -841,7 +1149,7 @@ def run_eval(args):
 			# metrics_list = all_metrics_raw_seed[idx_seed]
 
 			# compute mean metrics for this seed across all test scenes
-			metrics_mean_seed = compute_mean_metrics_for_seed(args.room_type, args.is_full_scene, metrics_list, os.path.join(args.pth_output, str(rand_seed)), args.n_test_scenes)
+			metrics_mean_seed = compute_mean_metrics_for_seed(args.room_type, args.is_full_scene, metrics_list, os.path.join(args.pth_output, str(rand_seed)), args.n_test_scenes, args.do_rectangular_only)
 			all_metrics_mean_seed.append(metrics_mean_seed)
 	
 	if args.do_metrics:
@@ -902,7 +1210,7 @@ if __name__ == "__main__":
 
 	parser = argparse.ArgumentParser(description='Author: Martin Juan José Bucher')
 
-	parser.add_argument('--env', dest='env', type=str, choices=["sherlock", "local", "stanley"], default="local")
+	parser.add_argument('--env', dest='env', type=str)
 	parser.add_argument('--pth-input', type=str)
 	parser.add_argument('--pth-output', type=str)
 	parser.add_argument('--do-metrics', action='store_true', default=False)
@@ -910,6 +1218,8 @@ if __name__ == "__main__":
 	parser.add_argument('--is-full-scene', action='store_true', default=False)
 	parser.add_argument('--n-test-scenes', type=int, default=500)
 	parser.add_argument('--create-gifs', action='store_true', default=False)
+	parser.add_argument('--do-rectangular-only', action='store_true', default=False)
+	parser.add_argument("--seed-only", type=int)
 
 	parser.add_argument('--metrics-file-postfix', type=str, default=None)
 

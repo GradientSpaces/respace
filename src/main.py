@@ -15,13 +15,23 @@ from peft import get_peft_model
 import wandb
 import pdb
 
-from src.dataset import load_train_val_test_datasets, count_samples_exceeding_max_length, count_samples_testset_seeds_exceeding_max_length
+# CRITICAL FIX: Remove CUBLAS_WORKSPACE_CONFIG early to prevent vLLM deterministic errors
+# This must happen BEFORE any vLLM imports (which might be triggered transitively)
+# We'll restore it later if needed for deterministic training phases
+_CUBLAS_CONFIG_BACKUP = os.environ.pop('CUBLAS_WORKSPACE_CONFIG', None)
+if _CUBLAS_CONFIG_BACKUP:
+	print(f"[STARTUP] Temporarily removed CUBLAS_WORKSPACE_CONFIG={_CUBLAS_CONFIG_BACKUP} to allow vLLM sampling")
+
+from src.dataset import load_train_val_test_datasets
 from src.sample import AssetRetrievalModule
 from src.test import run_test
-from src.utils import set_seeds, get_model, remove_and_recreate_folder, init_wandb, get_lora_config, StreamToLogger, get_test_instrs_all
+from src.utils import set_seeds, get_model, init_wandb, StreamToLogger
 from src.train_grpo import run_grpo_training
-from src.train_dpo import run_dpo_training
+# NOTE: train_dpo imports vLLM at module level, which causes issues with deterministic algorithms
+# Import it lazily only when needed to avoid importing vLLM before set_seeds() is called
+# from src.train_dpo import run_dpo_training
 from src.train_sft import run_sft_training
+from src.train_rej import do_rej_training
 
 # **********************************************************************************************************
 
@@ -57,8 +67,9 @@ def main(args):
 		sys.stdout = StreamToLogger(logging.getLogger('stdout'), dvc)
 		sys.stderr = StreamToLogger(logging.getLogger('stderr'), dvc, log_level=logging.ERROR)
 
-	is_sft_training = (not args.do_grpo and not args.do_dpo)
-	use_determ = (True if is_sft_training else False)
+	is_sft_training = (not args.do_grpo and not args.do_dpo and not args.do_rej_sft)
+	# use_determ = (True if is_sft_training else False)
+	use_determ = False
 	set_seeds(args.seed, use_determ=use_determ) #, use_deterministic=use_deterministic)
 	print(f"After set_seeds, deterministic algorithms enabled: {torch.are_deterministic_algorithms_enabled()}, use_deterministic was {use_determ}")
 
@@ -72,9 +83,6 @@ def main(args):
 		print(f"train: {len(dataset_train)}")
 		print(f"val: {len(dataset_val)}")
 		print(f"test: {len(dataset_test)}")
-		# all_test_instrs = get_test_instrs_all(args.room_type)
-		# pdb.set_trace()
-		exit()
 
 	if args.test_ckpt is not None:
 		model_id = f"./ckpts/{args.test_ckpt}"
@@ -94,7 +102,8 @@ def main(args):
 		else:
 			raise ValueError("model not found")
 
-	model, tokenizer, max_seq_length = get_model(model_id, args.use_gpu, accelerator)
+	# loading model and tokenizer
+	model, tokenizer, max_seq_length = get_model(model_id, args.use_gpu, accelerator, do_not_load_hf_model=(args.do_grpo or args.do_dpo or args.do_rej_sft))
 
 	# print("\nChecking for samples exceeding max_seq_length after processing:")
 	# all_prompts = json.load(open(os.getenv("PTH_ASSETS_METADATA_PROMPTS")))
@@ -114,14 +123,15 @@ def main(args):
 	# run_test(model, tokenizer, accelerator, dvc, "train", args.room_type, dataset_train.select(range(n_max)), max_seq_length, sampling_engine, all_prompts, all_assets_metadata_simple_descs, args.do_simple_descs, args, do_print=False)
 	# exit()
 
-	if args.do_dpo:
+	if args.do_rej_sft:
+		do_rej_training(model_id, tokenizer, accelerator, dataset_train, dataset_val, dataset_test, sampling_engine, dvc, args)
+	elif args.do_dpo:
+		from src.train_dpo import run_dpo_training
 		run_dpo_training(model_id, tokenizer, accelerator, dataset_train, dataset_val, dataset_test, sampling_engine, dvc, args)
 	elif args.do_grpo:
 		run_grpo_training(model_id, tokenizer, accelerator, dataset_train, dataset_val, dataset_test, sampling_engine, dvc, args)
 	elif args.test_ckpt is None:
 		run_sft_training(model, model_id, max_seq_length, tokenizer, accelerator, dataset_train, dataset_val, dataset_test, sampling_engine, dvc, args)
-	elif args.do_run_interactive:
-		run_interactive(model, tokenizer, max_seq_length, accelerator, dvc, dataset_train, dataset_val, dataset_test, sampling_engine, args)
 	else:
 		init_wandb(args, accelerator, resume_id=(args.test_ckpt.split("/")[0]))
 		all_prompts = json.load(open(os.getenv("PTH_ASSETS_METADATA_PROMPTS")))
@@ -173,6 +183,15 @@ if __name__ == "__main__":
 	
 	parser.add_argument('--grpo-learning-rate', type=float, default=1e-6)
 	parser.add_argument('--dpo-learning-rate', type=float, default=1e-7)
+	parser.add_argument('--dpo-beta', type=float, default=0.1)
+	parser.add_argument('--dpo-samples-per-epoch', type=int, default=1024)
+
+	parser.add_argument('--do-rej-sft', action='store_true', default=False)
+	parser.add_argument('--rej-num-gen', type=int, default=4)
+	parser.add_argument('--rej-learning-rate', type=float, default=5e-5)
+	parser.add_argument('--rej-samples-per-epoch', type=int, default=1000)
+	parser.add_argument("--rej-max-samples-per-prompt", type=int, default=None)
+	parser.add_argument("--rej-use-fixed-subset", action="store_true", help="Use fixed subset of training scenes for rejection sampling (for catastrophic forgetting experiments)")
 
 	parser.add_argument('--use-vllm', action='store_true', default=False)
 
@@ -189,6 +208,8 @@ if __name__ == "__main__":
 	parser.add_argument('--test-bs', type=int, default=1)
 	parser.add_argument('--do-testset-only', action='store_true', default=False)
 	parser.add_argument('--do-run-interactive', action='store_true', default=False)
+
+	parser.add_argument("--num-eval-workers", type=int, default=1, help="Number of threads for parallel eval scoring")
 
 	parser.add_argument('--vllm-host', type=str)
 	parser.add_argument('--vllm-port', type=str)
