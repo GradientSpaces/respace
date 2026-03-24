@@ -1,6 +1,6 @@
 <div align="center">
 
-# ReSpace: Text-Driven 3D Indoor Scene Synthesis <br/>and Editing with Preference Alignment
+# ReSpace: Text-Driven Autoregressive 3D Indoor <br/> Scene Synthesis and Editing
 
 [**Martin JJ. Bucher**](https://mnbucher.com) · [**Iro Armeni**](http://ir0.github.io)
 
@@ -14,7 +14,7 @@ Stanford University
 </div>
 
 ## Abstract
-Scene synthesis and editing has emerged as a promising direction in computer graphics. Current trained approaches for 3D indoor scenes either oversimplify object semantics through one-hot class encodings (e.g., 'chair' or 'table'), require masked diffusion for editing, ignore room boundaries, or rely on floor plan renderings that fail to capture complex layouts. LLM-based methods enable richer semantics via natural language (e.g., `modern studio with light wood furniture'), but lack editing functionality, are limited to rectangular layouts, or rely on weak spatial reasoning from implicit world models. We introduce **ReSpace**, a generative framework for text-driven 3D indoor scene synthesis and editing using autoregressive language models. Our approach features a compact structured scene representation with explicit room boundaries  that enables asset-agnostic deployment and frames scene editing as a next-token prediction task. We leverage a dual-stage training approach combining supervised fine-tuning and preference alignment, enabling a specially trained language model for object addition that accounts for user instructions, spatial geometry, object semantics, and scene-level composition. For scene editing, we employ a zero-shot LLM to handle object removal and prompts for addition. We further introduce a voxelization-based evaluation capturing fine-grained geometry beyond 3D bounding boxes. Experimental results surpass state-of-the-art on addition and achieve superior human-perceived quality on full scene synthesis.
+Scene synthesis and editing has emerged as a promising direction in computer graphics. Current trained approaches for 3D indoor scene generation either oversimplify object semantics through one-hot class encodings (e.g., 'chair' or 'table'), require masked diffusion for editing, ignore room boundaries, or rely on floor plan renderings that fail to capture complex layouts. LLM-based methods enable richer semantics via natural language, but lack editing functionality, are limited to rectangular layouts, or rely on weak spatial reasoning from implicit world models. We introduce ReSpace, a generative framework for autoregressive text-driven 3D indoor scene synthesis and editing. Our approach features a compact structured scene representation with explicit room boundaries that enables asset-agnostic deployment and frames scene manipulation as a next-token prediction task, supporting object addition, removal, and swapping via natural language. We employ supervised fine-tuning with a preference alignment stage to train a specialized language model for object addition that accounts for user instructions, spatial geometry, object semantics, and scene-level composition. We further introduce a voxelization-based evaluation metric capturing fine-grained geometric violations beyond 3D bounding boxes. Experiments surpass state-of-the-art on object addition and achieve superior human-perceived quality on the application of full scene synthesis, despite not being trained on it.
 
 <img src="assets/respace-teaser-desktop.png" width="100%"/>
 
@@ -23,7 +23,7 @@ Scene synthesis and editing has emerged as a promising direction in computer gra
 - **Text-Driven Editing**: Add, remove, and swap objects via natural language instructions
 - **Structured Scene Representation (SSR)**: Lightweight JSON-based format with explicit room boundaries and natural language object descriptions
 - **Specialized SG-LLM**: Language model trained specifically for 3D spatial reasoning and object placement  
-- **Preference Alignment**: GRPO training with reward function involving geometric and semantic constraints
+- **Preference Alignment**: RLVR training with reward function involving geometric and semantic constraints
 - **Voxelization-Based Loss**: Fine-grained evaluation beyond 3D bounding boxes
 
 ## Comparison With Recent Methods
@@ -200,9 +200,9 @@ Before starting training, you might need to ask for permission for the model che
 ./src/scripts/train/respace_train_stage_1_sft.sh
 ```
 
-### Stage 2: Preference Alignment with GRPO
+### Stage 2: Preference Alignment (RLVR with RFT)
 ```bash
-./src/scripts/train/respace_train_stage_2_grpo.sh
+./src/scripts/train/respace_train_stage_2_rft.sh
 ```
 
 ## 📈 Evaluation
