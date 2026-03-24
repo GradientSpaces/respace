@@ -119,178 +119,111 @@ def get_stats_per_n_object_from_file(filename, n_aggregate_per=2):
 	return n_objects_sorted, delta_pbl_mean, delta_pbl_std, mean_floor_areas, std_floor_areas
 
 def plot_stats_per_n_objects_instr(room_type, postfix, n_aggregate_per=2):
-	import matplotlib.font_manager as fm
-	
-	# Create figure with shared x-axis
-	fig, ax1 = plt.subplots(figsize=(10, 8))
 
 	plt.rcParams['font.family'] = 'STIXGeneral'
-	plt.rcParams['mathtext.fontset'] = 'stix'  # For math symbols
-	plt.rcParams['font.size'] = 12  # Default size, will override where needed
-	plt.rcParams['text.usetex'] = False  # Using built-in math rendering
-	plt.rcParams['axes.unicode_minus'] = True  # Proper minus signs
+	plt.rcParams['mathtext.fontset'] = 'stix'
+	plt.rcParams['font.size'] = 12
+	plt.rcParams['text.usetex'] = False
+	plt.rcParams['axes.unicode_minus'] = True
 
 	times_new_roman_size = 36
-	
-	# Better blue color palette - more coherent and professional
-	blue_colors = ['#78a5cc', "#3d79b4", "#29619A", "#13417D"]  # Ordered from lighter to darker
-	
-	# Get delta_pbl results for each model
+	label_font_size = 28
+	tick_font_size = 28
+
+	blue_colors = ['#78a5cc', "#3d79b4", "#29619A", "#13417D"]
+
+	fig, ax1 = plt.subplots(figsize=(10, 8))
+
 	n_objects_sorted1, delta_pbl_mean1, delta_pbl_std1, _, _ = get_stats_per_n_object_from_file(
-		f"eval_samples_baseline-atiss_instr_{room_type}_raw.json", 
+		f"eval_samples_baseline-atiss_instr_{room_type}_raw.json",
 		n_aggregate_per=n_aggregate_per
 	)
-	
 	n_objects_sorted2, delta_pbl_mean2, delta_pbl_std2, _, _ = get_stats_per_n_object_from_file(
-		f"eval_samples_baseline-midiff_instr_{room_type}_raw.json", 
+		f"eval_samples_baseline-midiff_instr_{room_type}_raw.json",
 		n_aggregate_per=n_aggregate_per
 	)
-	
-	# n_objects_sorted3, delta_pbl_mean3, delta_pbl_std3, _, _ = get_stats_per_n_object_from_file(
-	#     f"eval_samples_respace_instr_{room_type}_raw_llama1b.json", 
-	#     n_aggregate_per=n_aggregate_per
-	# )
-	
 	n_objects_sorted4, delta_pbl_mean4, delta_pbl_std4, _, _ = get_stats_per_n_object_from_file(
-		f"eval_samples_respace_instr_{postfix}_raw.json", 
+		f"eval_samples_respace_instr_{postfix}_raw.json",
 		n_aggregate_per=n_aggregate_per
 	)
-	
-	# Get floor areas data from the first file - they're the same for all models
 	_, _, _, floor_areas, floor_std = get_stats_per_n_object_from_file(
-		f"eval_samples_baseline-atiss_instr_{room_type}_raw.json", 
+		f"eval_samples_baseline-atiss_instr_{room_type}_raw.json",
 		n_aggregate_per=n_aggregate_per
 	)
-	
-	# Use less intrusive error visualization - alpha and smaller markers
-	# Plot delta_pbl lines with error regions instead of bars
-	ax1.plot(n_objects_sorted1, delta_pbl_mean1, 'o-', 
-			 markersize=6, linewidth=2, 
+
+	ax1.plot(n_objects_sorted1, delta_pbl_mean1, 'o-',
+			 markersize=6, linewidth=2,
 			 color=blue_colors[0], label="ATISS")
-	ax1.fill_between(n_objects_sorted1, 
-					[m-s for m,s in zip(delta_pbl_mean1, delta_pbl_std1)],
-					[m+s for m,s in zip(delta_pbl_mean1, delta_pbl_std1)],
-					color=blue_colors[0], alpha=0.1)
-	
-	ax1.plot(n_objects_sorted2, delta_pbl_mean2, 'o-', 
-			 markersize=6, linewidth=2, 
+	ax1.fill_between(n_objects_sorted1,
+					 [m - s for m, s in zip(delta_pbl_mean1, delta_pbl_std1)],
+					 [m + s for m, s in zip(delta_pbl_mean1, delta_pbl_std1)],
+					 color=blue_colors[0], alpha=0.1)
+
+	ax1.plot(n_objects_sorted2, delta_pbl_mean2, 'o-',
+			 markersize=6, linewidth=2,
 			 color=blue_colors[1], label="Mi-Diff")
-	ax1.fill_between(n_objects_sorted2, 
-					[m-s for m,s in zip(delta_pbl_mean2, delta_pbl_std2)],
-					[m+s for m,s in zip(delta_pbl_mean2, delta_pbl_std2)],
-					color=blue_colors[1], alpha=0.1)
-	
-	# Plot the fourth dataset (Ours-1.5B) also using blue scheme
-	ax1.plot(n_objects_sorted4, delta_pbl_mean4, 'o-', 
-			 markersize=6, linewidth=2, 
+	ax1.fill_between(n_objects_sorted2,
+					 [m - s for m, s in zip(delta_pbl_mean2, delta_pbl_std2)],
+					 [m + s for m, s in zip(delta_pbl_mean2, delta_pbl_std2)],
+					 color=blue_colors[1], alpha=0.1)
+
+	ax1.plot(n_objects_sorted4, delta_pbl_mean4, 'o-',
+			 markersize=6, linewidth=2,
 			 color=blue_colors[3], label="$\\text{ReSpace/A}^{\\dagger}$")
-	ax1.fill_between(n_objects_sorted4, 
-					[m-s for m,s in zip(delta_pbl_mean4, delta_pbl_std4)],
-					[m+s for m,s in zip(delta_pbl_mean4, delta_pbl_std4)],
-					color=blue_colors[3], alpha=0.1)
-	
-	# Set up secondary y-axis for floor area
+	ax1.fill_between(n_objects_sorted4,
+					 [m - s for m, s in zip(delta_pbl_mean4, delta_pbl_std4)],
+					 [m + s for m, s in zip(delta_pbl_mean4, delta_pbl_std4)],
+					 color=blue_colors[3], alpha=0.1)
+
 	ax2 = ax1.twinx()
-	
-	# Plot floor area as a shaded polygon
-	ax2.plot(n_objects_sorted1, floor_areas, linewidth=1.5, color='#9a9a9a', linestyle='--')
-	
-	# Create shaded area below the floor area line
-	# Convert to arrays if they're not already
+
 	n_objects_array = np.array(n_objects_sorted1)
 	floor_array = np.array(floor_areas)
-	
-	# Create polygon vertices for shaded area
 	x_poly = np.concatenate([n_objects_array, np.flip(n_objects_array)])
 	y_poly = np.concatenate([floor_array, np.zeros_like(floor_array)])
-	
-	# Plot the shaded area
+
+	ax2.plot(n_objects_sorted1, floor_areas, linewidth=1.5, color='#9a9a9a', linestyle='--')
 	ax2.fill(x_poly, y_poly, alpha=0.1, color='#7a7a7a', label="Floor Area")
-	
-	# Calculate max range for x-axis
-	max_n_objects = max(max(n_objects_sorted1 or [0]), 
-					  max(n_objects_sorted2 or [0]), 
-					  # max(n_objects_sorted3 or [0]), 
-					  max(n_objects_sorted4 or [0]))
-	
-	# Create appropriate bins for x-ticks based on aggregation parameter
+
+	max_n_objects = max(
+		max(n_objects_sorted1 or [0]),
+		max(n_objects_sorted2 or [0]),
+		max(n_objects_sorted4 or [0])
+	)
 	x_ticks = list(range(1, max_n_objects + 1, n_aggregate_per))
-	x_tick_labels = []
-	for i in range(0, len(x_ticks), 1):
-		start = x_ticks[i]
-		end = start + n_aggregate_per - 1
-		x_tick_labels.append(f"{start}-{end}")
-	
-	ax1.set_title(f"Delta VBL — ‘{room_type.split('-')[0]}’ dataset", fontsize=times_new_roman_size)
-	
-	# Create smaller font size for labels
-	# label_font = fm.FontProperties(fname='/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf')
-	label_font_size = 32
-	
+	x_tick_labels = [f"{x_ticks[i]}-{x_ticks[i] + n_aggregate_per - 1}" for i in range(len(x_ticks))]
+
+	ax1.set_title(f"Delta VBL — '{room_type.split('-')[0]}' dataset", fontsize=times_new_roman_size)
 	ax1.set_xlabel("# of objects", fontsize=label_font_size)
 	ax1.set_ylabel("Δ VBL", fontsize=label_font_size)
 	ax2.set_ylabel("Mean Floor Area (m²)", fontsize=label_font_size)
 
-	tick_font_size = 32
-	
-	ax1.tick_params(axis='y', labelcolor='black')
-	ax2.tick_params(axis='y', labelcolor='black')
-	
+	ax1.tick_params(axis='both', labelsize=tick_font_size)
+	ax2.tick_params(axis='both', labelsize=tick_font_size)
+
 	ax1.set_xticks(x_ticks)
 	ax1.set_xticklabels(x_tick_labels, fontsize=tick_font_size)
-
-	# round y-axis ticks to 2 decimal places
-	ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.1f}'))
-
-	# set ylim_min of both y-axis to the min value
-	ax1_ylim_min = min(min(delta_pbl_mean1), min(delta_pbl_mean2), min(delta_pbl_mean4))
-	ax1.set_ylim(bottom=ax1_ylim_min)
-	ax2_ylim_min = min(floor_areas)
-	print(ax1_ylim_min, ax2_ylim_min)
-	ax2.set_ylim(bottom=ax2_ylim_min)
-
-	# set to steps of 40
-	ax1.set_yticks(np.arange(20, 160, 40))
-
-	# for ax2, set yticks to be values in steps divisible by 5 but do NOT show other values
-	yticks = ax2.get_yticks()
-	yticks = [tick for tick in yticks if tick % 5 == 0]
-	if room_type == "all":
-		# remove 10.0 and 15.0
-		yticks = [tick for tick in yticks if tick != 10.0 and tick != 15.0]
-	elif room_type == "livingroom":
-		# remove 25.0
-		yticks = [tick for tick in yticks if tick != 25.0]
-	ax2.set_yticks(yticks)
-	ax2.set_yticklabels([f"{tick:.0f}" for tick in yticks], fontsize=tick_font_size)
-
 	ax1.set_xlim(left=x_ticks[0], right=x_ticks[-1])
 	ax2.set_xlim(left=x_ticks[0], right=x_ticks[-1])
-	
-	# Apply tick font size to y-tick labels
-	for label in ax1.get_yticklabels() + ax2.get_yticklabels():
-		label.set_size(tick_font_size)
-	
+
+	ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.1f}'))
+	ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.0f}'))
+
+	ax1_ylim_min = min(min(delta_pbl_mean1), min(delta_pbl_mean2), min(delta_pbl_mean4))
+	ax1.set_ylim(bottom=ax1_ylim_min)
+	ax2.set_ylim(bottom=min(floor_areas))
+
 	lines1, labels1 = ax1.get_legend_handles_labels()
 	lines2, labels2 = ax2.get_legend_handles_labels()
-	
-	legend_font = fm.FontProperties(fname='/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf')
-	legend_font.set_size(30)
-	
-	legend = ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', prop=legend_font)
+	legend = ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right', fontsize=26)
 	legend.get_frame().set_alpha(0.99)
-	# Additional customization of legend frame
-	# legend.get_frame().set_edgecolor('black')
-	
-	# Add grid for better readability
-	ax1.grid(True, linestyle='--', alpha=0.3)
-	
-	plt.tight_layout()
 
-	# make spacing even tighter
-	plt.subplots_adjust(left=0.16, right=0.9, top=0.94, bottom=0.12)
+	ax1.grid(True, linestyle='--', alpha=0.3)
+
+	plt.tight_layout()
+	plt.subplots_adjust(left=0.14, right=0.91, top=0.93, bottom=0.12)
+	plt.savefig(f"./plots/delta_pbl_vs_n_objects_{postfix}_with_area.jpg")
 	plt.savefig(f"./plots/delta_pbl_vs_n_objects_{postfix}_with_area.pdf")
-	# plt.savefig(f"./plots/delta_pbl_vs_n_objects_{room_type}_with_area.png", dpi=300)
 
 def render_comparison(mode, row_type, pth_root, pth_folder_fig_prefix, seed_and_idx, camera_height=None, is_supp=False, asset_sampling=False, num_asset_samples=0, sampling_engine=None):
 	bg_color = np.array([240, 240, 240]) / 255.0
@@ -378,7 +311,6 @@ def render_comparison(mode, row_type, pth_root, pth_folder_fig_prefix, seed_and_
 		# render ours
 		# scene = json.load(open(f"{pth_root}/respace/{mode}/{room_type}{'-with-qwen1.5b-all-grpo-bon-1'}/json/{seed_and_idx[0]}/{seed_and_idx[1]}_{seed_and_idx[0]}.json", "r"))
 		scene = json.load(open(f"{pth_root}/respace/{mode}/{room_type}{'-rej-n512fixed-1e5-bon-1'}/json/{seed_and_idx[0]}/{seed_and_idx[1]}_{seed_and_idx[0]}.json", "r"))
-		# scene = json.load(open(f"{pth_root}/respace/{mode}/{'all'}{'-rej-n512fixed-1e5-bon-1-shuffling-8'}/json/{seed_and_idx[0]}/{seed_and_idx[1]}_{seed_and_idx[0]}.json", "r"))
 		render_full_scene_and_export_with_gif(scene, filename="0-3", pth_output=pth_folder_fig, create_gif=False, bg_color=bg_color, camera_height=camera_height)
 		
 		# render GT or special version
@@ -401,7 +333,7 @@ def render_comparison(mode, row_type, pth_root, pth_folder_fig_prefix, seed_and_
 			else:
 				# take BON8 sample as last column
 				# scene = json.load(open(f"{pth_root}/respace/{mode}/{room_type}{'-with-qwen1.5b-all-grpo-bon-8'}/json/{seed_and_idx[0]}/{seed_and_idx[1]}_{seed_and_idx[0]}.json", "r"))
-				scene = json.load(open(f"{pth_root}/respace/{mode}/{room_type}{'-rej-n512fixed-1e5-bon-1-shuffling-8-fast'}/json/{seed_and_idx[0]}/{seed_and_idx[1]}_{seed_and_idx[0]}.json", "r"))
+				scene = json.load(open(f"{pth_root}/respace/{mode}/{room_type}{'-rej-n512fixed-1e5-bon-1-shuffling-8-bonrot-fast-v3'}/json/{seed_and_idx[0]}/{seed_and_idx[1]}_{seed_and_idx[0]}.json", "r"))
 				render_full_scene_and_export_with_gif(scene, filename="0-4", pth_output=pth_folder_fig, create_gif=False, bg_color=bg_color, camera_height=camera_height)
 		
 		return None
@@ -579,7 +511,7 @@ def load_metrics_for_row(row_type, mode, sample, seed_idx_lookup, asset_sampling
 	ours_file = f"{base_path}eval_samples_respace_{mode}_{dataset_type}-rej-n512fixed-1e5-bon-1-shuffling-1_raw.json"
 	
 	# ours_file_bon8 = f"{base_path}eval_samples_respace_{mode}_{dataset_type}-with-qwen1.5b-all-grpo-bon-8_qwen1.5b-all-grpo-bon-8_raw.json"
-	ours_file_bon8 = f"{base_path}eval_samples_respace_{mode}_{dataset_type}-rej-n512fixed-1e5-bon-1-shuffling-8-fast_raw.json"
+	ours_file_bon8 = f"{base_path}eval_samples_respace_{mode}_{dataset_type}-rej-n512fixed-1e5-bon-1-shuffling-8-bonrot-fast-v3_raw.json"
 	
 	metrics_ours = json.load(open(ours_file, "r"))[seed_idx][idx]
 	metrics_ours_bon8 = json.load(open(ours_file_bon8, "r"))[seed_idx][idx] if os.path.exists(ours_file_bon8) else None
@@ -686,7 +618,7 @@ def set_column_titles(mode, axs, is_supp=False, asset_sampling=False, num_asset_
 			"ATISS",
 			"Mi-Diff",
 			"ReSpace (ours)" if mode == "instr" else ("ReSpace" if is_supp==False else r'$\mathrm{ReSpace/A}^{\dagger}$'),
-			"Scene After (GT)" if mode == "instr" else ("GT" if is_supp==False else r'$\mathrm{ReSpace/A}^{\dagger}_{S8}$')
+			"Scene After (GT)" if mode == "instr" else ("GT" if is_supp==False else r'$\mathrm{ReSpace/A}^{\dagger}_{S8{+}R}$')
 		]
 	
 	# Set the titles
@@ -1004,9 +936,13 @@ def plot_pms_analysis():
 
 	# Process data for each room split separately
 	room_splits = {
-		"Bedroom": ["eval/samples/respace/full/bedroom-with-qwen1.5b-all-grpo-bon-1/json"],
-		"Livingroom": ["eval/samples/respace/full/livingroom-with-qwen1.5b-all-grpo-bon-1/json"],
-		"All": ["eval/samples/respace/full/all-with-qwen1.5b-all-grpo-bon-1/json"],
+		# "Bedroom": ["eval/samples/respace/full/bedroom-with-qwen1.5b-all-grpo-bon-1/json"],
+		# "Livingroom": ["eval/samples/respace/full/livingroom-with-qwen1.5b-all-grpo-bon-1/json"],
+		# "All": ["eval/samples/respace/full/all-with-qwen1.5b-all-grpo-bon-1/json"],
+
+		"Bedroom": ["eval/samples/respace/full/bedroom-rej-n512fixed-1e5-bon-1-shuffling-8-bonrot-fast-v3/json"],
+		"Livingroom": ["eval/samples/respace/full/livingroom-rej-n512fixed-1e5-bon-1-shuffling-8-bonrot-fast-v3/json"],
+		"All": ["eval/samples/respace/full/all-rej-n512fixed-1e5-bon-1-shuffling-8-bonrot-fast-v3/json"],
 	}
 
 	split_dfs = {}
@@ -1091,7 +1027,7 @@ def plot_pms_analysis():
 	plt.title("PMS Variability / Full", fontsize=times_new_roman_size)
 	plt.tight_layout()
 	plt.subplots_adjust(left=0.1, right=0.98, top=0.93, bottom=0.11)
-	plt.savefig("./plots/pms_relationships_all.svg")
+	plt.savefig("./plots/pms_relationships_all.jpg")
 	plt.savefig("./plots/pms_relationships_all.pdf")
 
 	print("Plot saved as ./plots/pms_relationships_all.svg and .pdf")
@@ -1938,192 +1874,192 @@ def plot_seq_accuracy_vs_instr_length(room_type: str, bon_values: list = [1, 8],
 	print(f"Saved to ./plots/seq_accuracy_vs_instr_length{suffix}.{{svg,pdf}}")
 
 def plot_ttc_scaling():
-    """
-    Test-time compute scaling plot for full scene synthesis (bedroom split).
-    X-axis: per-scene runtime in seconds (linear).
-    Primary Y-axis (left, blue):  Total VBL × 10³ (lower is better).
-    Secondary Y-axis (right, black): PMS (higher is better).
-    Win-rate annotated as a badge where available.
-    """
+	"""
+	Test-time compute scaling plot for full scene synthesis (bedroom split).
+	X-axis: per-scene runtime in seconds (linear).
+	Primary Y-axis (left, blue):  Total VBL × 10³ (lower is better).
+	Secondary Y-axis (right, black): PMS (higher is better).
+	Win-rate annotated as a badge where available.
+	"""
 
-    # ── Hardcoded data ────────────────────────────────────────────────────────
-    # (label, runtime_s, vbl_mean, vbl_std, pms_mean, winrate_or_None)
-    # Runtime from LaTeX table comments (mean scene gen time, seed 5678).
-    # VBL and PMS from the bedroom ablation table.
-    TTC_CONFIGS = [
-        # label                 rt(s)   	VBL   		   PMS    WR%
-        ("$B_1$", 				6.11,		134.8,	5.3,  0.69,  None),
-        
+	# ── Hardcoded data ────────────────────────────────────────────────────────
+	# (label, runtime_s, vbl_mean, vbl_std, pms_mean, winrate_or_None)
+	# Runtime from LaTeX table comments (mean scene gen time, seed 5678).
+	# VBL and PMS from the bedroom ablation table.
+	TTC_CONFIGS = [
+		# label                 rt(s)   	VBL   		   PMS    WR%
+		("$B_1$", 				6.11,		134.8,	5.3,  0.69,  None),
+		
 		("$B_8$", 				9.88,		68.5,   2.8,  0.80,  None),
-        
+		
 		("$B_1{+}R$", 			9.16,		68.9,   1.3,  0.79,  None),
-        
+		
 		("$B_8{+}R$", 			16.75,		39.0,   4.7,  0.83,  None),
 
-        ("$B_1{+}S_8$", 		15.90, 		27.4,   0.5,  0.80,  70.0),
-        
+		("$B_1{+}S_8$", 		15.90, 		27.4,   0.5,  0.80,  70.0),
+		
 		("$B_8{+}S_8$", 		32.46,		15.1,   2.0,  0.90,  None),
-        
+		
 		("$B_1{+}R{+}S_8$", 	16.12,		14.6,   1.7,  0.90,  None),
-        
+		
 		("$B_8{+}R{+}S_8$",		139.29,		8.8,   	2.9,  0.94,  None),
-    ]
+	]
 
-    # ── Font / style ──────────────────────────────────────────────────────────
-    plt.rcParams['font.family']        = 'STIXGeneral'
-    plt.rcParams['mathtext.fontset']   = 'stix'
-    plt.rcParams['font.size']          = 12
-    plt.rcParams['text.usetex']        = False
-    plt.rcParams['axes.unicode_minus'] = True
+	# ── Font / style ──────────────────────────────────────────────────────────
+	plt.rcParams['font.family']        = 'STIXGeneral'
+	plt.rcParams['mathtext.fontset']   = 'stix'
+	plt.rcParams['font.size']          = 12
+	plt.rcParams['text.usetex']        = False
+	plt.rcParams['axes.unicode_minus'] = True
 
-    times_new_roman_size = 36
-    label_font_size      = 28
-    tick_font_size       = 28
-    legend_font_size     = 22
-    annot_font_size      = 26
+	times_new_roman_size = 36
+	label_font_size      = 28
+	tick_font_size       = 28
+	legend_font_size     = 22
+	annot_font_size      = 26
 
-    # ── Unpack ────────────────────────────────────────────────────────────────
-    labels   = [c[0] for c in TTC_CONFIGS]
-    runtimes = np.array([c[1] for c in TTC_CONFIGS])
-    vbl_mean = np.array([c[2] for c in TTC_CONFIGS])
-    vbl_std  = np.array([c[3] for c in TTC_CONFIGS])
-    pms_mean = np.array([c[4] for c in TTC_CONFIGS])
-    winrates = [c[5] for c in TTC_CONFIGS]
+	# ── Unpack ────────────────────────────────────────────────────────────────
+	labels   = [c[0] for c in TTC_CONFIGS]
+	runtimes = np.array([c[1] for c in TTC_CONFIGS])
+	vbl_mean = np.array([c[2] for c in TTC_CONFIGS])
+	vbl_std  = np.array([c[3] for c in TTC_CONFIGS])
+	pms_mean = np.array([c[4] for c in TTC_CONFIGS])
+	winrates = [c[5] for c in TTC_CONFIGS]
 
-    # ── Figure with twin y-axis ───────────────────────────────────────────────
-    fig, ax1 = plt.subplots(figsize=(10, 8))
-    ax2 = ax1.twinx()
+	# ── Figure with twin y-axis ───────────────────────────────────────────────
+	fig, ax1 = plt.subplots(figsize=(10, 8))
+	ax2 = ax1.twinx()
 
-    x_lo = runtimes.min() * 0.75
-    x_hi = runtimes.max() * 1.4          # extra right margin for labels
+	x_lo = runtimes.min() * 0.75
+	x_hi = runtimes.max() * 1.4          # extra right margin for labels
 
-    # ── Faint connecting lines (sorted by runtime) ────────────────────────────
-    order = np.argsort(runtimes)
-    ax1.plot(runtimes[order], vbl_mean[order],
-             '-', linewidth=2.5, color=blue_colors[1], alpha=0.65, zorder=3)
-    ax2.plot(runtimes[order], pms_mean[order],
-             '-', linewidth=2.5, color=orange_colors[2], alpha=0.65, zorder=3)
+	# ── Faint connecting lines (sorted by runtime) ────────────────────────────
+	order = np.argsort(runtimes)
+	ax1.plot(runtimes[order], vbl_mean[order],
+			 '-', linewidth=2.5, color=blue_colors[1], alpha=0.65, zorder=3)
+	ax2.plot(runtimes[order], pms_mean[order],
+			 '-', linewidth=2.5, color=orange_colors[2], alpha=0.65, zorder=3)
 
-    # ── VBL markers + error bars (ax1, blue) ─────────────────────────────────
-    marker_styles = ['o', 's', '^', 'D', 'v', 'P', '*', 'X']
-    for i in range(len(TTC_CONFIGS)):
-        ax1.errorbar(
-            runtimes[i], vbl_mean[i],
-            yerr=vbl_std[i],
-            fmt=marker_styles[i % len(marker_styles)],
-            markersize=11,
-            color=blue_colors[2],
-            ecolor=blue_colors[1],
-            elinewidth=1.5,
-            capsize=4,
-            zorder=5,
-        )
+	# ── VBL markers + error bars (ax1, blue) ─────────────────────────────────
+	marker_styles = ['o', 's', '^', 'D', 'v', 'P', '*', 'X']
+	for i in range(len(TTC_CONFIGS)):
+		ax1.errorbar(
+			runtimes[i], vbl_mean[i],
+			yerr=vbl_std[i],
+			fmt=marker_styles[i % len(marker_styles)],
+			markersize=11,
+			color=blue_colors[2],
+			ecolor=blue_colors[1],
+			elinewidth=1.5,
+			capsize=4,
+			zorder=5,
+		)
 
-    # ── PMS markers (ax2, orange) ─────────────────────────────────────────────
-    for i in range(len(TTC_CONFIGS)):
-        ax2.scatter(runtimes[i], pms_mean[i],
-                    marker=marker_styles[i % len(marker_styles)],
-                    s=90, color=orange_colors[3], zorder=4)
+	# ── PMS markers (ax2, orange) ─────────────────────────────────────────────
+	for i in range(len(TTC_CONFIGS)):
+		ax2.scatter(runtimes[i], pms_mean[i],
+					marker=marker_styles[i % len(marker_styles)],
+					s=90, color=orange_colors[3], zorder=4)
 
-    # ── Method name labels (alternating above / below) ────────────────────────
-    label_dy = [16, -12, 8, 10, -8, 8, -8, 8]
-    for i, (lbl, xp, ym) in enumerate(zip(labels, runtimes, vbl_mean)):
-        dy = label_dy[i]
-        va = 'bottom' if dy > 0 else 'top'
-        ax1.annotate(
-            lbl,
-            xy=(xp, ym),
-            xytext=(0, dy),
-            textcoords="offset points",
-            fontsize=annot_font_size,
-            ha='center', va=va,
-            color='black',
-            zorder=7,
-        )
+	# ── Method name labels (alternating above / below) ────────────────────────
+	label_dy = [16, -12, 8, 10, -8, 8, -8, 8]
+	for i, (lbl, xp, ym) in enumerate(zip(labels, runtimes, vbl_mean)):
+		dy = label_dy[i]
+		va = 'bottom' if dy > 0 else 'top'
+		ax1.annotate(
+			lbl,
+			xy=(xp, ym),
+			xytext=(0, dy),
+			textcoords="offset points",
+			fontsize=annot_font_size,
+			ha='center', va=va,
+			color='black',
+			zorder=7,
+		)
 
-    # # ── Win-rate badges ───────────────────────────────────────────────────────
-    # for i, (xp, ym, wr) in enumerate(zip(runtimes, vbl_mean, winrates)):
-    #     if wr is None:
-    #         continue
-    #     ax1.annotate(
-    #         f"WR: {wr:.0f}\\%",
-    #         xy=(xp, ym),
-    #         xytext=(34, 0),
-    #         textcoords="offset points",
-    #         fontsize=annot_font_size,
-    #         color='black',
-    #         fontweight='bold',
-    #         va='center',
-    #         bbox=dict(boxstyle="round,pad=0.3", facecolor='white',
-    #                   edgecolor='#888888', alpha=0.92),
-    #         arrowprops=dict(arrowstyle="-", color='#888888', lw=1.0),
-    #         zorder=8,
-    #     )
+	# # ── Win-rate badges ───────────────────────────────────────────────────────
+	# for i, (xp, ym, wr) in enumerate(zip(runtimes, vbl_mean, winrates)):
+	#     if wr is None:
+	#         continue
+	#     ax1.annotate(
+	#         f"WR: {wr:.0f}\\%",
+	#         xy=(xp, ym),
+	#         xytext=(34, 0),
+	#         textcoords="offset points",
+	#         fontsize=annot_font_size,
+	#         color='black',
+	#         fontweight='bold',
+	#         va='center',
+	#         bbox=dict(boxstyle="round,pad=0.3", facecolor='white',
+	#                   edgecolor='#888888', alpha=0.92),
+	#         arrowprops=dict(arrowstyle="-", color='#888888', lw=1.0),
+	#         zorder=8,
+	#     )
 
-    # ── X-axis (log scale, sparse clean ticks) ────────────────────────────────
-    # One tick per data point causes overlap in the 6/8/9 and 16/24 clusters.
-    # Instead show a small set of round reference values that don't collide.
-    ax1.set_xscale('log')
-    ax1.xaxis.set_minor_locator(plt.NullLocator())
-    sparse_ticks = [6, 10, 25, 140]
-    ax1.set_xticks(sparse_ticks)
-    ax1.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0f}s"))
-    ax1.tick_params(axis='x', which='major', labelsize=tick_font_size - 2)
-    ax1.set_xlim(x_lo, x_hi)
+	# ── X-axis (log scale, sparse clean ticks) ────────────────────────────────
+	# One tick per data point causes overlap in the 6/8/9 and 16/24 clusters.
+	# Instead show a small set of round reference values that don't collide.
+	ax1.set_xscale('log')
+	ax1.xaxis.set_minor_locator(plt.NullLocator())
+	sparse_ticks = [6, 10, 25, 140]
+	ax1.set_xticks(sparse_ticks)
+	ax1.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.0f}s"))
+	ax1.tick_params(axis='x', which='major', labelsize=tick_font_size - 2)
+	ax1.set_xlim(x_lo, x_hi)
 
-    # ── Y-axis limits based on our data only ──────────────────────────────────
-    vbl_lo = max(0, (vbl_mean - vbl_std).min() * 0.85)
-    vbl_hi = (vbl_mean + vbl_std).max() * 1.1
-    ax1.set_ylim(0, vbl_hi)
-    ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.0f}'))
-    ax1.tick_params(axis='both', labelsize=tick_font_size, labelcolor='black')
-    ax1.yaxis.label.set_color('black')
-    ax1.spines['left'].set_color('black')
+	# ── Y-axis limits based on our data only ──────────────────────────────────
+	vbl_lo = max(0, (vbl_mean - vbl_std).min() * 0.85)
+	vbl_hi = (vbl_mean + vbl_std).max() * 1.1
+	ax1.set_ylim(0, vbl_hi)
+	ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.0f}'))
+	ax1.tick_params(axis='both', labelsize=tick_font_size, labelcolor='black')
+	ax1.yaxis.label.set_color('black')
+	ax1.spines['left'].set_color('black')
 
-    pms_lo = pms_mean.min()
-    pms_hi = min(1.0, pms_mean.max() * 1.04)
-    ax2.set_ylim(0, pms_hi)
-    ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.2f}'))
-    ax2.tick_params(axis='y', labelcolor='black', labelsize=tick_font_size)
-    ax2.yaxis.label.set_color('black')
-    ax2.spines['right'].set_color('black')
+	pms_lo = pms_mean.min()
+	pms_hi = min(1.0, pms_mean.max() * 1.04)
+	ax2.set_ylim(0, pms_hi)
+	ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:.2f}'))
+	ax2.tick_params(axis='y', labelcolor='black', labelsize=tick_font_size)
+	ax2.yaxis.label.set_color('black')
+	ax2.spines['right'].set_color('black')
 
-    # ── Legend ────────────────────────────────────────────────────────────────
-    from matplotlib.lines import Line2D
-    legend_handles = [
-        Line2D([0], [0], marker='o', color='w',
-               markerfacecolor=blue_colors[2], markersize=10,
-               label="VBL $\\times 10^3$ $\\downarrow$"),
-        Line2D([0], [0], marker='o', color='w',
-               markerfacecolor=orange_colors[3], markersize=10,
-               label="PMS $\\uparrow$"),
-    ]
-    try:
-        legend_font = fm.FontProperties(
-            fname='/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf')
-        legend_font.set_size(legend_font_size)
-        legend = ax1.legend(handles=legend_handles, loc='upper right', prop=legend_font, bbox_to_anchor=(1.0, 0.92))
-    except Exception:
-        legend = ax1.legend(handles=legend_handles, loc='upper right',
-                            fontsize=legend_font_size)
-    legend.get_frame().set_alpha(0.99)
+	# ── Legend ────────────────────────────────────────────────────────────────
+	from matplotlib.lines import Line2D
+	legend_handles = [
+		Line2D([0], [0], marker='o', color='w',
+			   markerfacecolor=blue_colors[2], markersize=10,
+			   label="VBL $\\times 10^3$ $\\downarrow$"),
+		Line2D([0], [0], marker='o', color='w',
+			   markerfacecolor=orange_colors[3], markersize=10,
+			   label="PMS $\\uparrow$"),
+	]
+	try:
+		legend_font = fm.FontProperties(
+			fname='/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf')
+		legend_font.set_size(legend_font_size)
+		legend = ax1.legend(handles=legend_handles, loc='upper right', prop=legend_font, bbox_to_anchor=(1.0, 0.92))
+	except Exception:
+		legend = ax1.legend(handles=legend_handles, loc='upper right',
+							fontsize=legend_font_size)
+	legend.get_frame().set_alpha(0.99)
 
-    # ── Labels / title ────────────────────────────────────────────────────────
-    ax1.set_title("Test-Time Compute Scaling / Full",
-                  fontsize=times_new_roman_size)
-    ax1.set_xlabel("Runtime Per Scene (log scale, seconds)", fontsize=label_font_size)
-    ax1.set_ylabel("Total VBL $\\times 10^3$ $\\downarrow$", fontsize=label_font_size)
-    ax2.set_ylabel("PMS $\\uparrow$", fontsize=label_font_size)
+	# ── Labels / title ────────────────────────────────────────────────────────
+	ax1.set_title("Test-Time Compute Scaling / Full",
+				  fontsize=times_new_roman_size)
+	ax1.set_xlabel("Runtime Per Scene (log scale, seconds)", fontsize=label_font_size)
+	ax1.set_ylabel("Total VBL $\\times 10^3$ $\\downarrow$", fontsize=label_font_size)
+	ax2.set_ylabel("PMS $\\uparrow$", fontsize=label_font_size)
 
-    ax1.grid(True, linestyle='--', alpha=0.3)
+	ax1.grid(True, linestyle='--', alpha=0.3)
 
-    plt.tight_layout()
-    plt.subplots_adjust(left=0.12, right=0.87, top=0.93, bottom=0.11)
+	plt.tight_layout()
+	plt.subplots_adjust(left=0.12, right=0.87, top=0.93, bottom=0.11)
 
-    plt.savefig("./plots/ttc_scaling.svg")
-    plt.savefig("./plots/ttc_scaling.pdf")
-    print("Saved ./plots/ttc_scaling.{svg,pdf}")
-    plt.close()
+	plt.savefig("./plots/ttc_scaling.svg")
+	plt.savefig("./plots/ttc_scaling.pdf")
+	print("Saved ./plots/ttc_scaling.{svg,pdf}")
+	plt.close()
 
 if __name__ == '__main__':
 	
@@ -2163,34 +2099,30 @@ if __name__ == '__main__':
 	# plot_stats_per_n_objects_instr("all", "all_qwen1.5B", n_aggregate_per=4)
 	# plot_stats_per_n_objects_instr("bedroom", "bedroom-with-qwen1.5b-all-grpo-bon-1_qwen1.5b-all-grpo-bon-1", n_aggregate_per=2)
 	# plot_stats_per_n_objects_instr("livingroom", "livingroom-with-qwen1.5b-all-grpo-bon-1_qwen1.5b-all-grpo-bon-1", n_aggregate_per=4)
+	
 	# plot_stats_per_n_objects_instr("all", "all-with-qwen1.5b-all-grpo-bon-1_qwen1.5b-all-grpo-bon-1", n_aggregate_per=4)
-	# plot_stats_per_n_objects_instr("all", "all-with-qwen1.5b-all-grpo-bon-1_qwen1.5b-all-grpo-bon-1", n_aggregate_per=4)
+	plot_stats_per_n_objects_instr("all", "all-rej-n512fixed-1e5-bon-1-shuffling-1", n_aggregate_per=4)
 
 	# plot_qualitative_figure_ours_vs_baselines_instr()
 	# plot_qualitative_figure_ours_vs_baselines_full()
+	
 	# plot_qualitative_figure_ours_vs_baselines_full_supp()
 
 	# plot_qualitative_figure_ours_vs_baseline_instr_assets()
 
 	# plot_pms_analysis()
 
-	plot_ttc_scaling()
-
-	# render_instr_sample()
-
-	# plot_figures_voxelization()
-
-	# render_teaser_figures()
+	# plot_ttc_scaling()
 
 	# plot_bon_full()
 
+	# plot_figures_voxelization()
+	# render_instr_sample()
+	# render_teaser_figures()
 	# plot_teaser_sample_360_video()
-
 	# plot_360_videos_instr()
 	# plot_360_videos_full()
-
 	# plot_assets_360_video()
-
 	# plot_voxelization_360_video()
 
 	# render_gt_test_all(["all"])
