@@ -249,7 +249,7 @@ If using our dataset/model or if you found our work useful, please consider citi
 
 ```bibtex
 @article{bucher2025respace,
-  title={ReSpace: Text-Driven 3D Scene Synthesis and Editing with Preference Alignment},
+  title={ReSpace: Text-Driven Autoregressive 3D Indoor Scene Synthesis and Editing},
   author={Bucher, Martin JJ and Armeni, Iro},
   journal={arXiv preprint arXiv:2506.02459},
   year={2025}
